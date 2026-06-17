@@ -82,5 +82,10 @@ class Player:
     soul_marks: int = 0
     legacy_points: int = 0
     sect_id: Optional[str] = None
+    meditation_started_at: Optional[str] = None
+    meditation_until: Optional[str] = None
+    meditation_minutes: int = 0
+    meditation_reward: int = 0
+    meditation_method_id: Optional[str] = None
     method_ids: list[str] = field(default_factory=list)
     inventory: dict[str, int] = field(default_factory=dict)

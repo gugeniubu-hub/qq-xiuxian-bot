@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS players (
   soul_marks INTEGER NOT NULL DEFAULT 0,
   legacy_points INTEGER NOT NULL DEFAULT 0,
   sect_id TEXT,
+  meditation_started_at TEXT,
+  meditation_until TEXT,
+  meditation_minutes INTEGER NOT NULL DEFAULT 0,
+  meditation_reward INTEGER NOT NULL DEFAULT 0,
+  meditation_method_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -59,7 +64,10 @@ CREATE TABLE IF NOT EXISTS items (
   name TEXT NOT NULL UNIQUE,
   item_type TEXT NOT NULL,
   rarity TEXT NOT NULL,
-  description TEXT NOT NULL
+  description TEXT NOT NULL,
+  base_price INTEGER NOT NULL DEFAULT 0,
+  consumable INTEGER NOT NULL DEFAULT 0,
+  tradable INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS inventories (
@@ -78,6 +86,7 @@ CREATE TABLE IF NOT EXISTS market_listings (
   quantity INTEGER NOT NULL,
   unit_price INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
+  buyer_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   sold_at TEXT,
   FOREIGN KEY (seller_user_id) REFERENCES players(user_id),
@@ -167,6 +176,15 @@ DEFAULT_METHODS = (
     ("void-scripture", "太虚轮回经", "筑基圆满", 0.18, 0.08, "taixu", 1),
 )
 
+DEFAULT_ITEMS = (
+    ("qigather", "聚气丹", "丹药", "凡品", "服用后可迅速积累一段修为。", 80, 1, 1),
+    ("spirit-herb", "灵草", "材料", "凡品", "炼丹与交易常用的基础灵材。", 25, 0, 1),
+    ("iron-ore", "玄铁矿", "材料", "凡品", "常见的锻材，也可在坊市流通。", 35, 0, 1),
+    ("restore-powder", "回灵散", "丹药", "凡品", "能快速补充体力。", 60, 1, 1),
+    ("rebirth-mark", "轮回印记", "秘物", "稀有", "转世重修所需的关键凭证。", 5000, 1, 1),
+    ("method-fragment", "吐纳残篇", "功法残篇", "稀有", "可用于参悟基础吐纳类功法。", 250, 0, 1),
+)
+
 
 def resolve_sqlite_path(database_url: str) -> Path:
     parsed = urlparse(database_url)
@@ -203,6 +221,14 @@ def initialize_database(database_url: str) -> Path:
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             DEFAULT_METHODS,
+        )
+        connection.executemany(
+            """
+            INSERT OR IGNORE INTO items (
+              id, name, item_type, rarity, description, base_price, consumable, tradable
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            DEFAULT_ITEMS,
         )
         connection.commit()
     return db_path

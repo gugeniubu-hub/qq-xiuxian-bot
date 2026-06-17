@@ -22,4 +22,5 @@ def test_calculate_rebirth_outcome_unlocks_more_features_over_time() -> None:
     )
     outcome = calculate_rebirth_outcome(player)
     assert outcome.legacy_points_gained == 2
+    assert outcome.next_root_floor == RootType.YELLOW
     assert len(outcome.unlocked_features) >= 4

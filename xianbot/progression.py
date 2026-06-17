@@ -42,7 +42,16 @@ def unlocks_for_rebirth_count(rebirth_count: int) -> list[RebirthUnlock]:
 
 def calculate_rebirth_outcome(player: Player) -> RebirthOutcome:
     next_count = player.rebirth_count + 1
-    next_root_floor = RootType.YELLOW if next_count >= 3 else RootType.MORTAL
+    if next_count >= 5:
+        next_root_floor = RootType.HEAVEN
+    elif next_count >= 4:
+        next_root_floor = RootType.EARTH
+    elif next_count >= 3:
+        next_root_floor = RootType.MYSTIC
+    elif next_count >= 2:
+        next_root_floor = RootType.YELLOW
+    else:
+        next_root_floor = RootType.MORTAL
     return RebirthOutcome(
         next_root_floor=next_root_floor,
         legacy_points_gained=1 + max(0, next_count - 1),

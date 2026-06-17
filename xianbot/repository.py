@@ -27,6 +27,48 @@ class GameRepository:
         cursor = await db.execute(query, params)
         return await cursor.fetchone()
 
+    async def _fetchall(
+        self,
+        db: aiosqlite.Connection,
+        query: str,
+        params: tuple[Any, ...] = (),
+    ) -> list[aiosqlite.Row]:
+        cursor = await db.execute(query, params)
+        return await cursor.fetchall()
+
+    async def _get_player_method_ids(
+        self,
+        db: aiosqlite.Connection,
+        user_id: str,
+    ) -> list[str]:
+        rows = await self._fetchall(
+            db,
+            """
+            SELECT method_id
+            FROM player_methods
+            WHERE user_id = ?
+            ORDER BY acquired_at
+            """,
+            (user_id,),
+        )
+        return [str(row["method_id"]) for row in rows]
+
+    async def _get_player_inventory_map(
+        self,
+        db: aiosqlite.Connection,
+        user_id: str,
+    ) -> dict[str, int]:
+        rows = await self._fetchall(
+            db,
+            """
+            SELECT item_id, quantity
+            FROM inventories
+            WHERE user_id = ? AND quantity > 0
+            """,
+            (user_id,),
+        )
+        return {str(row["item_id"]): int(row["quantity"]) for row in rows}
+
     async def get_player(self, user_id: str) -> Player | None:
         async with await self._connect() as db:
             row = await self._fetchone(
@@ -35,30 +77,42 @@ class GameRepository:
                 SELECT
                   user_id, nickname, root_type, realm, cultivation, age, lifespan,
                   spirit_stones, fortune, stamina, comprehension, rebirth_count,
-                  soul_marks, legacy_points, sect_id
+                  soul_marks, legacy_points, sect_id, meditation_started_at,
+                  meditation_until, meditation_minutes, meditation_reward,
+                  meditation_method_id
                 FROM players
                 WHERE user_id = ?
                 """,
                 (user_id,),
             )
-        if row is None:
-            return None
+            if row is None:
+                return None
+            method_ids = await self._get_player_method_ids(db, user_id)
+            inventory = await self._get_player_inventory_map(db, user_id)
+
         return Player(
             user_id=row["user_id"],
             nickname=row["nickname"],
             root_type=RootType(row["root_type"]),
             realm=Realm(row["realm"]),
-            cultivation=row["cultivation"],
-            age=row["age"],
-            lifespan=row["lifespan"],
-            spirit_stones=row["spirit_stones"],
-            fortune=row["fortune"],
-            stamina=row["stamina"],
-            comprehension=row["comprehension"],
-            rebirth_count=row["rebirth_count"],
-            soul_marks=row["soul_marks"],
-            legacy_points=row["legacy_points"],
+            cultivation=int(row["cultivation"]),
+            age=int(row["age"]),
+            lifespan=int(row["lifespan"]),
+            spirit_stones=int(row["spirit_stones"]),
+            fortune=int(row["fortune"]),
+            stamina=int(row["stamina"]),
+            comprehension=int(row["comprehension"]),
+            rebirth_count=int(row["rebirth_count"]),
+            soul_marks=int(row["soul_marks"]),
+            legacy_points=int(row["legacy_points"]),
             sect_id=row["sect_id"],
+            meditation_started_at=row["meditation_started_at"],
+            meditation_until=row["meditation_until"],
+            meditation_minutes=int(row["meditation_minutes"]),
+            meditation_reward=int(row["meditation_reward"]),
+            meditation_method_id=row["meditation_method_id"],
+            method_ids=method_ids,
+            inventory=inventory,
         )
 
     async def create_player(self, player: Player) -> Player:
@@ -68,8 +122,10 @@ class GameRepository:
                 INSERT INTO players (
                   user_id, nickname, root_type, realm, cultivation, age, lifespan,
                   spirit_stones, fortune, stamina, comprehension, rebirth_count,
-                  soul_marks, legacy_points, sect_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  soul_marks, legacy_points, sect_id, meditation_started_at,
+                  meditation_until, meditation_minutes, meditation_reward,
+                  meditation_method_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     player.user_id,
@@ -87,6 +143,11 @@ class GameRepository:
                     player.soul_marks,
                     player.legacy_points,
                     player.sect_id,
+                    player.meditation_started_at,
+                    player.meditation_until,
+                    player.meditation_minutes,
+                    player.meditation_reward,
+                    player.meditation_method_id,
                 ),
             )
             await db.commit()
@@ -105,30 +166,31 @@ class GameRepository:
         soul_marks_delta: int = 0,
         realm: Realm | None = None,
         root_type: RootType | None = None,
+        sect_id: str | None | object = None,
     ) -> None:
         updates: list[str] = []
         params: list[Any] = []
 
         if spirit_stones_delta:
-            updates.append("spirit_stones = spirit_stones + ?")
+            updates.append("spirit_stones = MAX(spirit_stones + ?, 0)")
             params.append(spirit_stones_delta)
         if cultivation_delta:
-            updates.append("cultivation = cultivation + ?")
+            updates.append("cultivation = MAX(cultivation + ?, 0)")
             params.append(cultivation_delta)
         if fortune_delta:
-            updates.append("fortune = fortune + ?")
+            updates.append("fortune = MAX(fortune + ?, 0)")
             params.append(fortune_delta)
         if stamina_delta:
-            updates.append("stamina = stamina + ?")
+            updates.append("stamina = MIN(MAX(stamina + ?, 0), 100)")
             params.append(stamina_delta)
         if legacy_points_delta:
-            updates.append("legacy_points = legacy_points + ?")
+            updates.append("legacy_points = MAX(legacy_points + ?, 0)")
             params.append(legacy_points_delta)
         if rebirth_count_delta:
-            updates.append("rebirth_count = rebirth_count + ?")
+            updates.append("rebirth_count = MAX(rebirth_count + ?, 0)")
             params.append(rebirth_count_delta)
         if soul_marks_delta:
-            updates.append("soul_marks = soul_marks + ?")
+            updates.append("soul_marks = MAX(soul_marks + ?, 0)")
             params.append(soul_marks_delta)
         if realm is not None:
             updates.append("realm = ?")
@@ -136,6 +198,9 @@ class GameRepository:
         if root_type is not None:
             updates.append("root_type = ?")
             params.append(root_type.value)
+        if sect_id is not None:
+            updates.append("sect_id = ?")
+            params.append(sect_id)
 
         if not updates:
             return
@@ -147,6 +212,51 @@ class GameRepository:
             await db.execute(
                 f"UPDATE players SET {', '.join(updates)} WHERE user_id = ?",
                 tuple(params),
+            )
+            await db.commit()
+
+    async def set_player_meditation(
+        self,
+        user_id: str,
+        *,
+        started_at: str,
+        until: str,
+        minutes: int,
+        reward: int,
+        method_id: str | None,
+    ) -> None:
+        async with await self._connect() as db:
+            await db.execute(
+                """
+                UPDATE players
+                SET
+                  meditation_started_at = ?,
+                  meditation_until = ?,
+                  meditation_minutes = ?,
+                  meditation_reward = ?,
+                  meditation_method_id = ?,
+                  updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                """,
+                (started_at, until, minutes, reward, method_id, user_id),
+            )
+            await db.commit()
+
+    async def clear_player_meditation(self, user_id: str) -> None:
+        async with await self._connect() as db:
+            await db.execute(
+                """
+                UPDATE players
+                SET
+                  meditation_started_at = NULL,
+                  meditation_until = NULL,
+                  meditation_minutes = 0,
+                  meditation_reward = 0,
+                  meditation_method_id = NULL,
+                  updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                """,
+                (user_id,),
             )
             await db.commit()
 
@@ -202,7 +312,8 @@ class GameRepository:
 
     async def list_accessible_sects(self, rebirth_count: int) -> list[dict[str, Any]]:
         async with await self._connect() as db:
-            cursor = await db.execute(
+            rows = await self._fetchall(
+                db,
                 """
                 SELECT id, name, theme, description, required_rebirth_count
                 FROM sects
@@ -211,7 +322,323 @@ class GameRepository:
                 """,
                 (rebirth_count,),
             )
-            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def get_sect_by_name(self, name: str) -> dict[str, Any] | None:
+        async with await self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT id, name, theme, description, required_rebirth_count
+                FROM sects
+                WHERE name = ?
+                """,
+                (name,),
+            )
+        return None if row is None else dict(row)
+
+    async def get_sect_by_id(self, sect_id: str) -> dict[str, Any] | None:
+        async with await self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT id, name, theme, description, required_rebirth_count
+                FROM sects
+                WHERE id = ?
+                """,
+                (sect_id,),
+            )
+        return None if row is None else dict(row)
+
+    async def set_player_sect(self, user_id: str, sect_id: str | None) -> None:
+        async with await self._connect() as db:
+            await db.execute(
+                """
+                UPDATE players
+                SET sect_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                """,
+                (sect_id, user_id),
+            )
+            await db.commit()
+
+    async def get_player_methods(self, user_id: str) -> list[dict[str, Any]]:
+        async with await self._connect() as db:
+            rows = await self._fetchall(
+                db,
+                """
+                SELECT
+                  cm.id,
+                  cm.name,
+                  cm.realm_requirement,
+                  cm.practice_bonus,
+                  cm.breakthrough_bonus,
+                  cm.source_sect_id,
+                  cm.required_rebirth_count
+                FROM cultivation_methods cm
+                INNER JOIN player_methods pm ON pm.method_id = cm.id
+                WHERE pm.user_id = ?
+                ORDER BY pm.acquired_at
+                """,
+                (user_id,),
+            )
+        return [dict(row) for row in rows]
+
+    async def get_sect_methods(
+        self,
+        sect_id: str,
+        rebirth_count: int,
+    ) -> list[dict[str, Any]]:
+        async with await self._connect() as db:
+            rows = await self._fetchall(
+                db,
+                """
+                SELECT
+                  id, name, realm_requirement, practice_bonus,
+                  breakthrough_bonus, source_sect_id, required_rebirth_count
+                FROM cultivation_methods
+                WHERE source_sect_id = ? AND required_rebirth_count <= ?
+                ORDER BY required_rebirth_count, realm_requirement
+                """,
+                (sect_id, rebirth_count),
+            )
+        return [dict(row) for row in rows]
+
+    async def grant_player_method(self, user_id: str, method_id: str) -> bool:
+        async with await self._connect() as db:
+            cursor = await db.execute(
+                """
+                INSERT OR IGNORE INTO player_methods (user_id, method_id)
+                VALUES (?, ?)
+                """,
+                (user_id, method_id),
+            )
+            await db.commit()
+        return cursor.rowcount > 0
+
+    async def get_item_by_name(self, item_name: str) -> dict[str, Any] | None:
+        async with await self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT
+                  id, name, item_type, rarity, description,
+                  base_price, consumable, tradable
+                FROM items
+                WHERE name = ?
+                """,
+                (item_name,),
+            )
+        return None if row is None else dict(row)
+
+    async def get_item_by_id(self, item_id: str) -> dict[str, Any] | None:
+        async with await self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT
+                  id, name, item_type, rarity, description,
+                  base_price, consumable, tradable
+                FROM items
+                WHERE id = ?
+                """,
+                (item_id,),
+            )
+        return None if row is None else dict(row)
+
+    async def list_inventory(self, user_id: str) -> list[dict[str, Any]]:
+        async with await self._connect() as db:
+            rows = await self._fetchall(
+                db,
+                """
+                SELECT
+                  i.item_id,
+                  it.name,
+                  it.item_type,
+                  it.rarity,
+                  it.description,
+                  i.quantity,
+                  it.tradable
+                FROM inventories i
+                INNER JOIN items it ON it.id = i.item_id
+                WHERE i.user_id = ? AND i.quantity > 0
+                ORDER BY it.item_type, it.rarity DESC, it.name
+                """,
+                (user_id,),
+            )
+        return [dict(row) for row in rows]
+
+    async def add_inventory_item(self, user_id: str, item_id: str, quantity: int) -> None:
+        async with await self._connect() as db:
+            await db.execute(
+                """
+                INSERT INTO inventories (user_id, item_id, quantity)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id, item_id)
+                DO UPDATE SET quantity = quantity + excluded.quantity
+                """,
+                (user_id, item_id, quantity),
+            )
+            await db.commit()
+
+    async def remove_inventory_item(self, user_id: str, item_id: str, quantity: int) -> bool:
+        async with await self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT quantity
+                FROM inventories
+                WHERE user_id = ? AND item_id = ?
+                """,
+                (user_id, item_id),
+            )
+            if row is None or int(row["quantity"]) < quantity:
+                return False
+            await db.execute(
+                """
+                UPDATE inventories
+                SET quantity = quantity - ?
+                WHERE user_id = ? AND item_id = ?
+                """,
+                (quantity, user_id, item_id),
+            )
+            await db.execute(
+                """
+                DELETE FROM inventories
+                WHERE user_id = ? AND item_id = ? AND quantity <= 0
+                """,
+                (user_id, item_id),
+            )
+            await db.commit()
+        return True
+
+    async def record_adventure(
+        self,
+        user_id: str,
+        *,
+        roll_value: int,
+        outcome: str,
+        reward_spirit_stones: int,
+        reward_cultivation: int,
+        reward_item_id: str | None,
+    ) -> None:
+        async with await self._connect() as db:
+            await db.execute(
+                """
+                INSERT INTO adventure_logs (
+                  user_id, action_type, roll_value, outcome,
+                  reward_spirit_stones, reward_cultivation, reward_item_id
+                ) VALUES (?, 'adventure', ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    roll_value,
+                    outcome,
+                    reward_spirit_stones,
+                    reward_cultivation,
+                    reward_item_id,
+                ),
+            )
+            await db.commit()
+
+    async def get_active_market_listings(self, limit: int = 20) -> list[dict[str, Any]]:
+        async with await self._connect() as db:
+            rows = await self._fetchall(
+                db,
+                """
+                SELECT
+                  ml.id,
+                  ml.seller_user_id,
+                  p.nickname AS seller_name,
+                  ml.item_id,
+                  it.name AS item_name,
+                  ml.quantity,
+                  ml.unit_price,
+                  ml.status,
+                  ml.created_at
+                FROM market_listings ml
+                INNER JOIN players p ON p.user_id = ml.seller_user_id
+                INNER JOIN items it ON it.id = ml.item_id
+                WHERE ml.status = 'active'
+                ORDER BY ml.id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        return [dict(row) for row in rows]
+
+    async def create_market_listing(
+        self,
+        seller_user_id: str,
+        item_id: str,
+        quantity: int,
+        unit_price: int,
+    ) -> int:
+        async with await self._connect() as db:
+            cursor = await db.execute(
+                """
+                INSERT INTO market_listings (
+                  seller_user_id, item_id, quantity, unit_price, status
+                ) VALUES (?, ?, ?, ?, 'active')
+                """,
+                (seller_user_id, item_id, quantity, unit_price),
+            )
+            await db.commit()
+        return int(cursor.lastrowid)
+
+    async def get_market_listing(self, listing_id: int) -> dict[str, Any] | None:
+        async with await self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT
+                  ml.id,
+                  ml.seller_user_id,
+                  p.nickname AS seller_name,
+                  ml.item_id,
+                  it.name AS item_name,
+                  ml.quantity,
+                  ml.unit_price,
+                  ml.status,
+                  ml.created_at
+                FROM market_listings ml
+                INNER JOIN players p ON p.user_id = ml.seller_user_id
+                INNER JOIN items it ON it.id = ml.item_id
+                WHERE ml.id = ?
+                """,
+                (listing_id,),
+            )
+        return None if row is None else dict(row)
+
+    async def mark_market_listing_sold(self, listing_id: int, buyer_user_id: str) -> None:
+        async with await self._connect() as db:
+            await db.execute(
+                """
+                UPDATE market_listings
+                SET status = 'sold', buyer_user_id = ?, sold_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (buyer_user_id, listing_id),
+            )
+            await db.commit()
+
+    async def list_top_players(self, limit: int = 10) -> list[dict[str, Any]]:
+        async with await self._connect() as db:
+            rows = await self._fetchall(
+                db,
+                """
+                SELECT
+                  nickname,
+                  realm,
+                  cultivation,
+                  spirit_stones,
+                  rebirth_count
+                FROM players
+                ORDER BY cultivation DESC, spirit_stones DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
         return [dict(row) for row in rows]
 
     async def record_rebirth(
