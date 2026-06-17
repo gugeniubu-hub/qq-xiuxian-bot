@@ -16,6 +16,7 @@ from xianbot.services import (
     adventure,
     breakthrough,
     buy_market_listing,
+    get_destiny_status,
     contemplate_method,
     consume_item,
     craft_elixir,
@@ -48,6 +49,7 @@ market_cmd = on_command("坊市帮助", aliases={"坊市设计"})
 rebirth_help_cmd = on_command("轮回帮助", aliases={"转世帮助", "轮回设计"})
 enter_path_cmd = on_command("入道")
 status_cmd = on_command("我的状态", aliases={"状态", "面板"})
+destiny_cmd = on_command("命格", aliases={"观命"})
 sign_in_cmd = on_command("签到", aliases={"修仙签到"})
 sect_list_cmd = on_command("宗门列表")
 rebirth_cmd = on_command("转世", aliases={"轮回"})
@@ -162,10 +164,30 @@ async def handle_status(event: MessageEvent) -> None:
                 f"境界: {player.realm.value}",
                 f"修为: {player.cultivation}",
                 f"悟性: {player.comprehension} | 道悟: {player.insight} | 冲关底蕴: {player.breakthrough_ready}",
+                f"命格: {player.destiny_type.value + '·' + str(player.destiny_level) + '重' if player.destiny_type and player.destiny_level > 0 else '二转后显化'}",
                 f"主修: {method_summary}",
                 f"灵石: {player.spirit_stones} | 福缘: {player.fortune} | 体力: {player.stamina}",
                 f"寿元: {player.age}/{player.lifespan}",
                 f"轮回: {player.rebirth_count} 转 | 前尘点: {player.legacy_points} | 轮回印记: {player.soul_marks}",
+            ]
+        )
+    )
+
+
+@destiny_cmd.handle()
+async def handle_destiny(event: MessageEvent) -> None:
+    try:
+        result = await get_destiny_status(event.get_user_id())
+    except GameError as exc:
+        if str(exc) == "player_not_found":
+            await destiny_cmd.finish("你还未入道，发送“入道”开始。")
+        raise
+    await destiny_cmd.finish(
+        "\n".join(
+            [
+                f"命格: {result.destiny_name}",
+                f"层数: {result.destiny_level}重",
+                f"效果: {result.description}",
             ]
         )
     )
@@ -220,9 +242,15 @@ async def handle_rebirth_action(event: MessageEvent) -> None:
         raise
 
     unlocks = "、".join(result.unlocked_features) if result.unlocked_features else "暂无"
+    destiny_line = (
+        f"命格：{result.destiny_name}·{result.destiny_level}重。"
+        if result.destiny_name != "命格未显"
+        else "命格：命格未显。"
+    )
     await rebirth_cmd.finish(
         f"道友已转世重修，前尘点 +{result.legacy_points_gained}。"
         f"新灵根保底为 {result.new_root_floor}，本次根骨：{result.root_brief}。"
+        f"{destiny_line}"
         f"解锁内容: {unlocks}。"
     )
 

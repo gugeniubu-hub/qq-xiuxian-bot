@@ -3,7 +3,7 @@ from collections import Counter
 
 from xianbot.config import get_settings
 from xianbot.database import initialize_database
-from xianbot.domain import MeditationMode, Realm
+from xianbot.domain import DestinyType, MeditationMode, Realm
 from xianbot.repository import GameRepository
 from xianbot.services import (
     adventure,
@@ -16,10 +16,12 @@ from xianbot.services import (
     duel,
     encounter,
     end_meditation,
+    get_destiny_status,
     get_player_methods,
     get_player_status,
     get_today_world_state,
     join_sect,
+    rebirth,
     list_inventory,
     set_primary_method,
     sign_in,
@@ -46,6 +48,9 @@ def test_create_player_and_sign_in(tmp_path, monkeypatch) -> None:
         updated = await get_player_status("10001")
         assert updated is not None
         assert updated.spirit_stones >= 420
+        assert updated.destiny_type is None
+        destiny = await get_destiny_status("10001")
+        assert destiny.destiny_name == "命格未显"
 
     asyncio.run(scenario())
     get_settings.cache_clear()
@@ -184,6 +189,146 @@ def test_duel_randomness_and_influences_are_applied(tmp_path, monkeypatch) -> No
         assert weaker is not None
         assert stronger.spirit_stones > weaker.spirit_stones
         assert weaker.cultivation >= 0
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_rebirth_unlocks_destiny_and_persists(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian10.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("50001", "reborn")
+        repo = GameRepository(get_settings().database_url)
+        await repo.update_player_stats(
+            "50001",
+            rebirth_count_delta=1,
+            realm=Realm.SPIRIT_4,
+            cultivation_delta=12000,
+            insight_delta=120,
+            breakthrough_ready_delta=80,
+            soul_marks_delta=1,
+            legacy_points_delta=6,
+        )
+
+        result = await rebirth("50001")
+        assert result.destiny_name != "命格未显"
+        assert result.destiny_level >= 1
+
+        player = await get_player_status("50001")
+        assert player is not None
+        assert player.rebirth_count == 2
+        assert player.destiny_type is not None
+        assert player.destiny_level == result.destiny_level
+        destiny = await get_destiny_status("50001")
+        assert destiny.destiny_name == result.destiny_name
+        assert destiny.destiny_level == result.destiny_level
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_destiny_improves_alchemy_and_duel(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian11.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("60001", "alchemist")
+        await create_player_if_missing("60002", "fighter")
+        await create_player_if_missing("60003", "target")
+        await join_sect("60001", "赤霄门")
+        await join_sect("60002", "赤霄门")
+        await join_sect("60003", "青岚宗")
+
+        repo = GameRepository(get_settings().database_url)
+        await repo.update_player_stats("60001", rebirth_count_delta=1)
+        await repo.add_inventory_item("60001", "clear-dew", 4)
+        await repo.add_inventory_item("60001", "flame-sand", 2)
+        await repo.add_inventory_item("60001", "moon-dust", 2)
+        await repo.add_inventory_item("60001", "marrow-jade", 2)
+
+        import xianbot.services as services
+
+        original_randint = services.random.randint
+        services.random.randint = lambda a, b: 82
+        try:
+            baseline_alchemy = await craft_elixir("60001", "洗髓丹")
+        finally:
+            services.random.randint = original_randint
+        assert baseline_alchemy.success is False
+
+        await repo.update_player_stats(
+            "60001",
+            rebirth_count_delta=1,
+            legacy_points_delta=6,
+            destiny_type=DestinyType.ALCHEMY,
+            destiny_level_delta=4,
+        )
+        try:
+            services.random.randint = lambda a, b: 82
+            empowered_alchemy = await craft_elixir("60001", "洗髓丹")
+        finally:
+            services.random.randint = original_randint
+        assert empowered_alchemy.success is True
+        assert empowered_alchemy.chance_percent > baseline_alchemy.chance_percent
+
+        await repo.update_player_stats(
+            "60002",
+            realm=Realm.FOUNDATION_2,
+            cultivation_delta=1500,
+            insight_delta=24,
+            breakthrough_ready_delta=35,
+            fortune_delta=18,
+        )
+        await repo.update_player_stats(
+            "60003",
+            realm=Realm.QI_4,
+            cultivation_delta=600,
+            insight_delta=6,
+            breakthrough_ready_delta=8,
+            fortune_delta=5,
+        )
+
+        sequence = iter([88, 36, 52])
+        duel_randint = services.random.randint
+        services.random.randint = lambda a, b: next(sequence)
+        try:
+            baseline_duel = await duel("60002", "60003")
+        finally:
+            services.random.randint = duel_randint
+
+        await repo.update_player_stats(
+            "60002",
+            cultivation_delta=-baseline_duel.winner_cultivation_gain,
+            stamina_delta=100,
+        )
+        await repo.update_player_stats(
+            "60003",
+            cultivation_delta=-baseline_duel.loser_cultivation_loss,
+            stamina_delta=100,
+        )
+        await repo.update_player_stats(
+            "60002",
+            destiny_type=DestinyType.BATTLE,
+            destiny_level_delta=4,
+        )
+
+        sequence = iter([88, 36, 52])
+        duel_randint = services.random.randint
+        services.random.randint = lambda a, b: next(sequence)
+        try:
+            empowered_duel = await duel("60002", "60003")
+        finally:
+            services.random.randint = duel_randint
+
+        assert baseline_duel.winner_name == "fighter"
+        assert empowered_duel.winner_name == "fighter"
+        assert empowered_duel.attacker_total > baseline_duel.attacker_total
 
     asyncio.run(scenario())
     get_settings.cache_clear()

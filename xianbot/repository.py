@@ -7,7 +7,16 @@ from typing import Any
 import aiosqlite
 
 from xianbot.database import resolve_sqlite_path
-from xianbot.domain import Affinity, MeditationMode, Player, Realm, RootTemperament, RootTrait, RootType
+from xianbot.domain import (
+    Affinity,
+    DestinyType,
+    MeditationMode,
+    Player,
+    Realm,
+    RootTemperament,
+    RootTrait,
+    RootType,
+)
 
 
 class GameRepository:
@@ -51,6 +60,8 @@ class GameRepository:
             player.rebirth_count,
             player.soul_marks,
             player.legacy_points,
+            None if player.destiny_type is None else player.destiny_type.value,
+            player.destiny_level,
             player.sect_id,
             player.primary_method_id,
             player.meditation_started_at,
@@ -123,7 +134,7 @@ class GameRepository:
                   user_id, nickname, root_type, root_affinity, root_purity, root_temperament,
                   root_trait, realm, cultivation, age, age_progress, lifespan,
                   spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
-                  rebirth_count, soul_marks, legacy_points, sect_id, primary_method_id,
+                  rebirth_count, soul_marks, legacy_points, destiny_type, destiny_level, sect_id, primary_method_id,
                   meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
                   meditation_method_id, meditation_mode, meditation_insight_reward,
                   meditation_breakthrough_reward
@@ -159,6 +170,8 @@ class GameRepository:
             rebirth_count=int(row["rebirth_count"]),
             soul_marks=int(row["soul_marks"]),
             legacy_points=int(row["legacy_points"]),
+            destiny_type=None if row["destiny_type"] is None else DestinyType(row["destiny_type"]),
+            destiny_level=int(row["destiny_level"]),
             sect_id=row["sect_id"],
             primary_method_id=row["primary_method_id"],
             meditation_started_at=row["meditation_started_at"],
@@ -200,11 +213,11 @@ class GameRepository:
                   user_id, nickname, root_type, root_affinity, root_purity, root_temperament,
                   root_trait, realm, cultivation, age, age_progress, lifespan,
                   spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
-                  rebirth_count, soul_marks, legacy_points, sect_id, primary_method_id,
+                  rebirth_count, soul_marks, legacy_points, destiny_type, destiny_level, sect_id, primary_method_id,
                   meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
                   meditation_method_id, meditation_mode, meditation_insight_reward,
                   meditation_breakthrough_reward
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 self._player_insert_params(player),
             )
@@ -225,11 +238,11 @@ class GameRepository:
                       user_id, nickname, root_type, root_affinity, root_purity, root_temperament,
                       root_trait, realm, cultivation, age, age_progress, lifespan,
                       spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
-                      rebirth_count, soul_marks, legacy_points, sect_id, primary_method_id,
+                      rebirth_count, soul_marks, legacy_points, destiny_type, destiny_level, sect_id, primary_method_id,
                       meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
                       meditation_method_id, meditation_mode, meditation_insight_reward,
                       meditation_breakthrough_reward
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     self._player_insert_params(player),
                 )
@@ -265,12 +278,14 @@ class GameRepository:
         rebirth_count_delta: int = 0,
         soul_marks_delta: int = 0,
         lifespan_delta: int = 0,
+        destiny_level_delta: int = 0,
         realm: Realm | None = None,
         root_type: RootType | None = None,
         root_affinity: Affinity | None = None,
         root_purity: int | None = None,
         root_temperament: RootTemperament | None = None,
         root_trait: RootTrait | None = None,
+        destiny_type: DestinyType | None | object = None,
         primary_method_id: str | None | object = None,
         sect_id: str | None | object = None,
     ) -> None:
@@ -307,6 +322,9 @@ class GameRepository:
         if lifespan_delta:
             updates.append("lifespan = MAX(lifespan + ?, 1)")
             params.append(lifespan_delta)
+        if destiny_level_delta:
+            updates.append("destiny_level = MAX(destiny_level + ?, 0)")
+            params.append(destiny_level_delta)
         if realm is not None:
             updates.append("realm = ?")
             params.append(realm.value)
@@ -325,6 +343,9 @@ class GameRepository:
         if root_trait is not None:
             updates.append("root_trait = ?")
             params.append(root_trait.value)
+        if destiny_type is not None:
+            updates.append("destiny_type = ?")
+            params.append(destiny_type.value)
         if primary_method_id is not None:
             updates.append("primary_method_id = ?")
             params.append(primary_method_id)

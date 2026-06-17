@@ -8,6 +8,7 @@ from typing import Any
 from xianbot.config import get_settings
 from xianbot.domain import (
     Affinity,
+    DestinyType,
     MeditationMode,
     MethodGrade,
     MethodStyle,
@@ -91,6 +92,24 @@ ROOT_TRAIT_ROLLS: tuple[tuple[int, RootTrait], ...] = (
     (92, RootTrait.WANDERING),
     (100, RootTrait.EMBER),
 )
+
+DESTINY_ROLLS: tuple[tuple[int, DestinyType], ...] = (
+    (22, DestinyType.FORTUNE),
+    (42, DestinyType.ALCHEMY),
+    (62, DestinyType.BATTLE),
+    (80, DestinyType.WISDOM),
+    (92, DestinyType.RESILIENT),
+    (100, DestinyType.TURNFATE),
+)
+
+DESTINY_DESCRIPTIONS: dict[DestinyType, str] = {
+    DestinyType.FORTUNE: "更容易得到福缘、签到分红与高段奇遇。",
+    DestinyType.ALCHEMY: "炼丹更稳，丹药收益也更高。",
+    DestinyType.BATTLE: "斗法与历练更强势，但更偏进攻。",
+    DestinyType.WISDOM: "参悟、闭关和功法熟练成长更顺。",
+    DestinyType.RESILIENT: "突破与承伤更稳，失败损耗更轻。",
+    DestinyType.TURNFATE: "坏运更难压到底，逆风时更容易翻盘。",
+}
 
 MASTERY_TITLES: tuple[tuple[int, str], ...] = (
     (0, "初窥"),
@@ -241,6 +260,8 @@ class RebirthResult:
     unlocked_features: list[str]
     new_root_floor: str
     root_brief: str
+    destiny_name: str
+    destiny_level: int
 
 
 @dataclass(slots=True)
@@ -380,6 +401,13 @@ class PrimaryMethodResult:
 
 
 @dataclass(slots=True)
+class DestinyResult:
+    destiny_name: str
+    destiny_level: int
+    description: str
+
+
+@dataclass(slots=True)
 class AlchemyResult:
     item_name: str
     roll_value: int
@@ -489,6 +517,17 @@ def _generate_root_profile(
     }
 
 
+def _generate_destiny_profile(rebirth_count: int, legacy_points: int) -> dict[str, object]:
+    if rebirth_count < 2:
+        return {"destiny_type": None, "destiny_level": 0}
+    destiny_type = _roll_destiny_type(rebirth_count)
+    destiny_level = _destiny_level_for_player(rebirth_count, legacy_points)
+    return {
+        "destiny_type": destiny_type,
+        "destiny_level": destiny_level,
+    }
+
+
 def mastery_title(mastery: int) -> str:
     current = MASTERY_TITLES[0][1]
     for threshold, title in MASTERY_TITLES:
@@ -517,6 +556,7 @@ def _root_training_bonus(player: Player) -> float:
     bonus += purity_training_bonus(player.root_purity)
     bonus += temperament_training_bonus(player.root_temperament)
     bonus += trait_training_bonus(player.root_trait)
+    bonus += _destiny_training_bonus(player)
     if player.rebirth_count > 0 and player.root_trait == RootTrait.EMBER:
         bonus += min(0.04, player.rebirth_count * 0.01)
     return bonus
@@ -528,6 +568,7 @@ def _root_breakthrough_total(player: Player) -> int:
     bonus += purity_breakthrough_bonus(player.root_purity)
     bonus += temperament_breakthrough_bonus(player.root_temperament)
     bonus += trait_breakthrough_bonus(player.root_trait)
+    bonus += _destiny_breakthrough_bonus(player)
     if player.root_affinity in {Affinity.THUNDER, Affinity.VOID}:
         bonus += 2
     if player.rebirth_count > 0 and player.root_trait == RootTrait.EMBER:
@@ -540,6 +581,7 @@ def _root_insight_total(player: Player) -> float:
     bonus += purity_insight_bonus(player.root_purity)
     bonus += temperament_insight_bonus(player.root_temperament)
     bonus += trait_insight_bonus(player.root_trait)
+    bonus += _destiny_insight_bonus(player)
     if player.root_affinity == Affinity.VOID:
         bonus += 0.05
     elif player.root_affinity == Affinity.THUNDER:
@@ -556,6 +598,7 @@ def _root_adventure_total(player: Player) -> int:
         bonus += 3
     if player.root_temperament == RootTemperament.FIERCE:
         bonus += 2
+    bonus += _destiny_adventure_bonus(player)
     return bonus
 
 
@@ -748,6 +791,101 @@ def _insight_multiplier(player: Player, method: dict[str, object] | None) -> flo
     return bonus
 
 
+def _roll_destiny_type(rebirth_count: int) -> DestinyType:
+    roll = random.randint(1, 100)
+    if rebirth_count >= 2 and roll >= 94:
+        return random.choice([DestinyType.TURNFATE, DestinyType.WISDOM, DestinyType.ALCHEMY])
+    return _weighted_choice(DESTINY_ROLLS, roll=roll)
+
+
+def _destiny_level_for_player(rebirth_count: int, legacy_points: int) -> int:
+    return max(1, min(6, 1 + rebirth_count + legacy_points // 3))
+
+
+def _destiny_brief(player: Player) -> str:
+    if player.destiny_type is None or player.destiny_level <= 0:
+        return "命格未显"
+    return f"{player.destiny_type.value}·{player.destiny_level}重"
+
+
+def _destiny_training_bonus(player: Player) -> float:
+    if player.destiny_type == DestinyType.WISDOM:
+        return 0.03 + player.destiny_level * 0.01
+    if player.destiny_type == DestinyType.ALCHEMY:
+        return 0.01 + player.destiny_level * 0.005
+    return 0.0
+
+
+def _destiny_insight_bonus(player: Player) -> float:
+    if player.destiny_type == DestinyType.WISDOM:
+        return 0.04 + player.destiny_level * 0.012
+    if player.destiny_type == DestinyType.TURNFATE:
+        return 0.015 * player.destiny_level
+    return 0.0
+
+
+def _destiny_breakthrough_bonus(player: Player) -> int:
+    if player.destiny_type == DestinyType.RESILIENT:
+        return 4 + player.destiny_level * 2
+    if player.destiny_type == DestinyType.WISDOM:
+        return 1 + player.destiny_level
+    return 0
+
+
+def _destiny_adventure_bonus(player: Player) -> int:
+    if player.destiny_type == DestinyType.FORTUNE:
+        return 4 + player.destiny_level * 2
+    if player.destiny_type == DestinyType.BATTLE:
+        return 3 + player.destiny_level * 2
+    if player.destiny_type == DestinyType.TURNFATE:
+        return 2 + player.destiny_level
+    return 0
+
+
+def _destiny_alchemy_bonus(player: Player) -> int:
+    if player.destiny_type == DestinyType.ALCHEMY:
+        return 8 + player.destiny_level * 3
+    if player.destiny_type == DestinyType.WISDOM:
+        return 3 + player.destiny_level
+    return 0
+
+
+def _destiny_duel_bonus(player: Player) -> int:
+    if player.destiny_type == DestinyType.BATTLE:
+        return 8 + player.destiny_level * 3
+    if player.destiny_type == DestinyType.RESILIENT:
+        return 3 + player.destiny_level * 2
+    if player.destiny_type == DestinyType.TURNFATE:
+        return 2 + player.destiny_level
+    return 0
+
+
+def _destiny_fortune_bonus(player: Player) -> int:
+    if player.destiny_type == DestinyType.FORTUNE:
+        return 5 + player.destiny_level * 2
+    if player.destiny_type == DestinyType.TURNFATE:
+        return 2 + player.destiny_level
+    return 0
+
+
+def _destiny_failure_guard(player: Player) -> int:
+    if player.destiny_type == DestinyType.TURNFATE:
+        return 4 + player.destiny_level * 2
+    if player.destiny_type == DestinyType.RESILIENT:
+        return 3 + player.destiny_level
+    return 0
+
+
+def _destiny_result(player: Player) -> DestinyResult:
+    if player.destiny_type is None or player.destiny_level <= 0:
+        return DestinyResult(destiny_name="命格未显", destiny_level=0, description="二转后方可真正凝出命格。")
+    return DestinyResult(
+        destiny_name=player.destiny_type.value,
+        destiny_level=player.destiny_level,
+        description=DESTINY_DESCRIPTIONS[player.destiny_type],
+    )
+
+
 def _find_alchemy_recipe(recipe_name: str) -> dict[str, Any] | None:
     target = recipe_name.strip()
     for recipe in ALCHEMY_RECIPES:
@@ -786,6 +924,7 @@ def _duel_total(player: Player, method: dict[str, object] | None, roll_value: in
     total += _realm_power(player)
     total += _root_breakthrough_total(player)
     total += _root_adventure_total(player) // 2
+    total += _destiny_duel_bonus(player)
     total += min(20, player.comprehension // 2)
     total += min(24, player.insight // 2)
     total += min(15, player.fortune // 5)
@@ -972,6 +1111,7 @@ async def create_player_if_missing(user_id: str, nickname: str) -> tuple[Player,
         fortune += 3
     elif root_trait == RootTrait.EMBER:
         fortune += 2
+    destiny = _generate_destiny_profile(0, 0)
 
     player = Player(
         user_id=user_id,
@@ -986,6 +1126,8 @@ async def create_player_if_missing(user_id: str, nickname: str) -> tuple[Player,
         fortune=fortune,
         comprehension=comprehension,
         stamina=100,
+        destiny_type=destiny["destiny_type"],  # type: ignore[arg-type]
+        destiny_level=destiny["destiny_level"],  # type: ignore[arg-type]
     )
     created = await repo.create_player_with_starter_items(
         player,
@@ -1003,6 +1145,13 @@ async def create_player_if_missing(user_id: str, nickname: str) -> tuple[Player,
 
 async def get_player_status(user_id: str) -> Player | None:
     return await get_repository().get_player(user_id)
+
+
+async def get_destiny_status(user_id: str) -> DestinyResult:
+    player = await get_repository().get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+    return _destiny_result(player)
 
 
 async def get_today_world_state() -> WorldStateResult:
@@ -1038,14 +1187,17 @@ async def sign_in(user_id: str) -> SignInResult:
     world_state = await _get_today_world_state()
     settings = get_settings()
     base_reward = random.randint(
-        settings.sign_in_base_min + player.fortune,
-        settings.sign_in_base_max + player.fortune,
+        settings.sign_in_base_min + player.fortune + _destiny_fortune_bonus(player),
+        settings.sign_in_base_max + player.fortune + _destiny_fortune_bonus(player),
     )
     cultivation_gain = random.randint(
         settings.sign_in_cultivation_min + player.comprehension,
         settings.sign_in_cultivation_max + player.comprehension,
     )
-    fortune_roll = min(100, random.randint(1, 100) + world_state.fortune_bonus)
+    fortune_roll = min(
+        100,
+        random.randint(1, 100) + world_state.fortune_bonus + _destiny_fortune_bonus(player),
+    )
     pool_reward = await repo.claim_signin(
         user_id,
         sign_date,
@@ -1134,7 +1286,7 @@ async def adventure(user_id: str) -> AdventureResult:
     roll_value = (
         random.randint(1, 100)
         + _root_adventure_total(player)
-        + player.fortune // 12
+        + (player.fortune + _destiny_fortune_bonus(player)) // 12
         + world_state.adventure_bonus // 3
         + min(8, player.rebirth_count * 2)
         + (0 if primary_method is None else int(primary_method.get("adventure_bonus", 0)))
@@ -1273,7 +1425,7 @@ async def encounter(user_id: str) -> EncounterResult:
     world_state = await _get_today_world_state()
     roll_value = (
         random.randint(1, 100)
-        + player.fortune // 8
+        + (player.fortune + _destiny_fortune_bonus(player)) // 8
         + world_state.encounter_bonus
         + min(12, player.rebirth_count * 3)
         + max(0, _root_adventure_total(player) // 2)
@@ -1574,6 +1726,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
         if player.breakthrough_ready < 24:
             raise GameError("not_enough_preparation")
 
+        failure_guard = _destiny_failure_guard(player)
         chance = 65
         chance += player.fortune // 8
         chance += world_state.fortune_bonus
@@ -1581,6 +1734,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
         chance += 0 if primary_method is None else int(primary_method.get("breakthrough_total", 0)) // 3
         chance += min(8, player.insight // 4)
         chance += min(12, player.breakthrough_ready // 5)
+        chance += failure_guard
         chance -= _lifespan_breakthrough_penalty(player)
         chance = max(18, min(chance, 98))
 
@@ -1614,12 +1768,16 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
                 preparation_cost=preparation_cost,
             )
 
-        penalty = -max(50, int(player.cultivation * get_settings().breakthrough_fail_penalty_rate))
+        penalty_rate = max(
+            0.08,
+            get_settings().breakthrough_fail_penalty_rate - failure_guard * 0.01,
+        )
+        penalty = -max(20, int(player.cultivation * penalty_rate))
         await repo.update_player_stats(
             user_id,
             cultivation_delta=penalty,
             breakthrough_ready_delta=-preparation_cost,
-            insight_delta=-min(player.insight, 2),
+            insight_delta=-min(player.insight, max(0, 2 - failure_guard // 6)),
         )
         _, lifespan_notice = await _apply_lifespan_progress(
             repo,
@@ -1648,6 +1806,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
     if player.breakthrough_ready < preparation_needed:
         raise GameError("not_enough_preparation")
 
+    failure_guard = _destiny_failure_guard(player)
     chance = breakthrough_base_chance(player.realm)
     chance += _root_breakthrough_total(player)
     chance += min(12, player.fortune // 10)
@@ -1656,6 +1815,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
     chance += min(14, player.breakthrough_ready // 5)
     chance += world_state.fortune_bonus
     chance += 0 if primary_method is None else int(primary_method.get("breakthrough_total", 0))
+    chance += failure_guard
     chance -= _lifespan_breakthrough_penalty(player)
     if major:
         chance -= 6
@@ -1691,12 +1851,15 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
         )
 
     penalty_rate = get_settings().breakthrough_fail_penalty_rate * (1.2 if major else 1.0)
-    penalty = -max(30, int(required * penalty_rate))
+    penalty = -max(
+        18 if not major else 24,
+        int(required * penalty_rate) - failure_guard * 18,
+    )
     await repo.update_player_stats(
         user_id,
         cultivation_delta=penalty,
         breakthrough_ready_delta=-preparation_cost,
-        insight_delta=-min(player.insight, 1 if major else 0),
+        insight_delta=-min(player.insight, max(0, (1 if major else 0) - failure_guard // 8)),
     )
     _, lifespan_notice = await _apply_lifespan_progress(
         repo,
@@ -1852,6 +2015,8 @@ async def craft_elixir(user_id: str, recipe_name: str) -> AlchemyResult:
     chance += min(12, player.comprehension // 2)
     chance += min(8, player.insight // 6)
     chance += min(6, player.rebirth_count * 2)
+    alchemy_bonus = _destiny_alchemy_bonus(player)
+    chance += alchemy_bonus
     if primary_method is not None:
         chance += min(8, int(float(primary_method.get("insight_total", 0.0)) * 100 // 4))
         chance += min(6, int(primary_method.get("mastery", 0)) // 40)
@@ -1879,7 +2044,12 @@ async def craft_elixir(user_id: str, recipe_name: str) -> AlchemyResult:
     if roll_value <= chance:
         quantity = 1
         insight_gain = 0
-        if roll_value <= max(8, chance // 6):
+        double_threshold = max(8, chance // 6)
+        if player.destiny_type == DestinyType.ALCHEMY:
+            double_threshold += max(1, player.destiny_level // 2)
+        elif player.destiny_type == DestinyType.WISDOM:
+            double_threshold += 1
+        if roll_value <= min(24, double_threshold):
             quantity = 2
             insight_gain = 1
         await repo.add_inventory_item(user_id, item_id, quantity)
@@ -2044,6 +2214,10 @@ async def contemplate_method(user_id: str, method_name: str | None = None) -> Me
         + max(0, world_state.encounter_bonus // 6)
         + int(insight_factor * 12)
     )
+    if player.destiny_type == DestinyType.WISDOM:
+        mastery_gain += 2 + player.destiny_level
+    elif player.destiny_type == DestinyType.TURNFATE:
+        mastery_gain += 1 + player.destiny_level // 2
     cultivation_gain = 60 + mastery_gain * 4
     insight_gain = max(2, int(1 + mastery_gain / 8))
     breakthrough_gain = 0
@@ -2151,26 +2325,35 @@ async def rebirth(user_id: str) -> RebirthResult:
         raise GameError("rebirth_locked")
 
     outcome = calculate_rebirth_outcome(player)
+    next_rebirth_count = player.rebirth_count + 1
+    next_legacy_points = player.legacy_points + outcome.legacy_points_gained
     profile = _generate_root_profile(outcome.next_root_floor, player.rebirth_count + 1)
+    destiny = _generate_destiny_profile(next_rebirth_count, next_legacy_points)
     new_lifespan = _lifespan_for_profile(
         profile["root_type"],  # type: ignore[arg-type]
         profile["root_trait"],  # type: ignore[arg-type]
     )
+    update_fields: dict[str, object] = {
+        "cultivation_delta": -player.cultivation,
+        "legacy_points_delta": outcome.legacy_points_gained,
+        "rebirth_count_delta": 1,
+        "soul_marks_delta": -1,
+        "lifespan_delta": new_lifespan - player.lifespan,
+        "realm": Realm.QI_1,
+        "root_type": profile["root_type"],  # type: ignore[dict-item]
+        "root_affinity": profile["root_affinity"],  # type: ignore[dict-item]
+        "root_purity": profile["root_purity"],  # type: ignore[dict-item]
+        "root_temperament": profile["root_temperament"],  # type: ignore[dict-item]
+        "root_trait": profile["root_trait"],  # type: ignore[dict-item]
+        "insight_delta": -player.insight,
+        "breakthrough_ready_delta": -player.breakthrough_ready,
+        "destiny_level_delta": int(destiny["destiny_level"]) - player.destiny_level,
+    }
+    if destiny["destiny_type"] is not None:
+        update_fields["destiny_type"] = destiny["destiny_type"]
     await repo.update_player_stats(
         user_id,
-        cultivation_delta=-player.cultivation,
-        legacy_points_delta=outcome.legacy_points_gained,
-        rebirth_count_delta=1,
-        soul_marks_delta=-1,
-        lifespan_delta=new_lifespan - player.lifespan,
-        realm=Realm.QI_1,
-        root_type=profile["root_type"],  # type: ignore[arg-type]
-        root_affinity=profile["root_affinity"],  # type: ignore[arg-type]
-        root_purity=profile["root_purity"],  # type: ignore[arg-type]
-        root_temperament=profile["root_temperament"],  # type: ignore[arg-type]
-        root_trait=profile["root_trait"],  # type: ignore[arg-type]
-        insight_delta=-player.insight,
-        breakthrough_ready_delta=-player.breakthrough_ready,
+        **update_fields,
     )
     await repo.reset_player_for_rebirth(user_id)
 
@@ -2187,9 +2370,12 @@ async def rebirth(user_id: str) -> RebirthResult:
     )
     refreshed = await repo.get_player(user_id)
     assert refreshed is not None
+    destiny_result = _destiny_result(refreshed)
     return RebirthResult(
         legacy_points_gained=outcome.legacy_points_gained,
         unlocked_features=[unlock.value for unlock in outcome.unlocked_features],
         new_root_floor=outcome.next_root_floor.value,
         root_brief=_root_brief(refreshed),
+        destiny_name=destiny_result.destiny_name,
+        destiny_level=destiny_result.destiny_level,
     )

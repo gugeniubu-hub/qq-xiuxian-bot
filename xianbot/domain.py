@@ -55,6 +55,15 @@ class RebirthUnlock(StrEnum):
     HIGHER_ROOT_FLOOR = "高阶灵根保底"
 
 
+class DestinyType(StrEnum):
+    FORTUNE = "福缘深厚"
+    ALCHEMY = "丹心通明"
+    BATTLE = "杀伐果决"
+    WISDOM = "宿慧未泯"
+    RESILIENT = "命硬如石"
+    TURNFATE = "逢凶化吉"
+
+
 class RootTemperament(StrEnum):
     BALANCED = "中正"
     FIERCE = "刚猛"
@@ -154,6 +163,8 @@ class Player:
     rebirth_count: int = 0
     soul_marks: int = 0
     legacy_points: int = 0
+    destiny_type: Optional[DestinyType] = None
+    destiny_level: int = 0
     sect_id: Optional[str] = None
     primary_method_id: Optional[str] = None
     meditation_started_at: Optional[str] = None
