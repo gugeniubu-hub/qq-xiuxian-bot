@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS players (
   realm TEXT NOT NULL,
   cultivation INTEGER NOT NULL DEFAULT 0,
   age INTEGER NOT NULL DEFAULT 16,
+  age_progress INTEGER NOT NULL DEFAULT 0,
   lifespan INTEGER NOT NULL DEFAULT 120,
   spirit_stones INTEGER NOT NULL DEFAULT 0,
   fortune INTEGER NOT NULL DEFAULT 0,
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS cultivation_methods (
 CREATE TABLE IF NOT EXISTS player_methods (
   user_id TEXT NOT NULL,
   method_id TEXT NOT NULL,
+  mastery INTEGER NOT NULL DEFAULT 0,
   acquired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, method_id),
   FOREIGN KEY (user_id) REFERENCES players(user_id),
@@ -143,6 +145,17 @@ CREATE TABLE IF NOT EXISTS legacy_unlocks (
   PRIMARY KEY (user_id, unlock_key),
   FOREIGN KEY (user_id) REFERENCES players(user_id)
 );
+
+CREATE TABLE IF NOT EXISTS world_states (
+  state_date TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  adventure_bonus INTEGER NOT NULL DEFAULT 0,
+  meditation_bonus REAL NOT NULL DEFAULT 0,
+  encounter_bonus INTEGER NOT NULL DEFAULT 0,
+  fortune_bonus INTEGER NOT NULL DEFAULT 0,
+  lifespan_bonus INTEGER NOT NULL DEFAULT 0
+);
 """
 
 DEFAULT_SECTS = (
@@ -181,6 +194,7 @@ DEFAULT_ITEMS = (
     ("spirit-herb", "灵草", "材料", "凡品", "炼丹与交易常用的基础灵材。", 25, 0, 1),
     ("iron-ore", "玄铁矿", "材料", "凡品", "常见的锻材，也可在坊市流通。", 35, 0, 1),
     ("restore-powder", "回灵散", "丹药", "凡品", "能快速补充体力。", 60, 1, 1),
+    ("longevity-fruit", "延寿果", "灵果", "稀有", "服下后可滋养气血，少量延缓寿元流逝。", 380, 1, 1),
     ("rebirth-mark", "轮回印记", "秘物", "稀有", "转世重修所需的关键凭证。", 5000, 1, 1),
     ("method-fragment", "吐纳残篇", "功法残篇", "稀有", "可用于参悟基础吐纳类功法。", 250, 0, 1),
 )
@@ -205,6 +219,7 @@ def initialize_database(database_url: str) -> Path:
     db_path = resolve_sqlite_path(database_url)
     with sqlite3.connect(db_path) as connection:
         connection.executescript(SCHEMA_SQL)
+        _ensure_schema_compatibility(connection)
         connection.executemany(
             """
             INSERT OR IGNORE INTO sects (
@@ -232,3 +247,21 @@ def initialize_database(database_url: str) -> Path:
         )
         connection.commit()
     return db_path
+
+
+def _ensure_schema_compatibility(connection: sqlite3.Connection) -> None:
+    player_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(players)").fetchall()
+    }
+    if "age_progress" not in player_columns:
+        connection.execute(
+            "ALTER TABLE players ADD COLUMN age_progress INTEGER NOT NULL DEFAULT 0"
+        )
+
+    player_method_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(player_methods)").fetchall()
+    }
+    if "mastery" not in player_method_columns:
+        connection.execute(
+            "ALTER TABLE player_methods ADD COLUMN mastery INTEGER NOT NULL DEFAULT 0"
+        )

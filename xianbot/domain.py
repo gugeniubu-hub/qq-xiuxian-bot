@@ -73,6 +73,7 @@ class Player:
     realm: Realm = Realm.QI_1
     cultivation: int = 0
     age: int = 16
+    age_progress: int = 0
     lifespan: int = 120
     spirit_stones: int = 0
     fortune: int = 0

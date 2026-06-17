@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     adventure_stamina_cost: int = Field(default=20)
     breakthrough_max_item_loss_rate: float = Field(default=0.18)
     breakthrough_fail_penalty_rate: float = Field(default=0.22)
+    lifespan_progress_per_adventure: int = Field(default=2)
+    lifespan_progress_per_encounter: int = Field(default=1)
+    lifespan_progress_per_60_meditation_minutes: int = Field(default=1)
+    method_mastery_meditation_gain: int = Field(default=3)
+    method_mastery_adventure_gain: int = Field(default=2)
+    method_mastery_encounter_gain: int = Field(default=4)
 
 
 @lru_cache

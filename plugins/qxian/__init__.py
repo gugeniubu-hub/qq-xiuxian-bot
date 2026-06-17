@@ -16,12 +16,16 @@ from xianbot.services import (
     adventure,
     breakthrough,
     buy_market_listing,
+    contemplate_method,
+    consume_item,
     create_market_listing,
     create_player_if_missing,
+    encounter,
     end_meditation,
     get_player_methods,
     get_player_status,
     get_rankings,
+    get_today_world_state,
     join_sect,
     list_inventory,
     list_market,
@@ -48,13 +52,17 @@ join_sect_cmd = on_command("加入宗门")
 methods_cmd = on_command("我的功法", aliases={"宗门传承"})
 inventory_cmd = on_command("背包")
 adventure_cmd = on_command("历练")
+encounter_cmd = on_command("奇遇")
 breakthrough_cmd = on_command("突破")
 meditate_cmd = on_command("闭关")
 leave_meditation_cmd = on_command("出关")
+consume_cmd = on_command("服用")
+insight_cmd = on_command("参悟")
 market_list_cmd = on_command("坊市")
 market_create_cmd = on_command("坊市上架")
 market_buy_cmd = on_command("坊市购买", aliases={"购买"})
 ranking_cmd = on_command("排行", aliases={"排行榜"})
+world_cmd = on_command("天象", aliases={"今日天象", "世界状态"})
 
 
 @driver.on_startup
@@ -65,6 +73,16 @@ async def startup() -> None:
 @help_cmd.handle()
 async def handle_help(event: MessageEvent) -> None:
     await help_cmd.finish(HELP_TEXT.format(user_id=event.get_user_id()))
+
+
+@world_cmd.handle()
+async def handle_world_state() -> None:
+    result = await get_today_world_state()
+    await world_cmd.finish(
+        f"今日天象：{result.title}\n{result.description}\n"
+        f"历练修正 {result.adventure_bonus:+} | 奇遇修正 {result.encounter_bonus:+} | "
+        f"闭关修正 {int(result.meditation_bonus * 100):+}%"
+    )
 
 
 @design_cmd.handle()
@@ -141,6 +159,7 @@ async def handle_sign_in(event: MessageEvent) -> None:
 
     extra = "今日鸿运加身。" if result.fortune_roll >= 96 else "气运平稳。"
     await sign_in_cmd.finish(
+        f"[{result.world_title}] "
         f"签到完成，获得灵石 {result.base_reward}，福缘池分红 {result.pool_reward}，"
         f"修为提升后总计 {result.total_cultivation}。{extra}"
     )
@@ -214,8 +233,9 @@ async def handle_methods(event: MessageEvent) -> None:
 
     lines = ["你已习得的功法:"]
     for method in methods:
+        mastery = int(method.get("mastery", 0))
         lines.append(
-            f"- {method['name']} ({method['realm_requirement']}) 修炼+{int(float(method['practice_bonus']) * 100)}%"
+            f"- {method['name']} ({method['realm_requirement']}) 修炼+{int(float(method['practice_bonus']) * 100)}% | 熟练 {mastery}"
         )
     await methods_cmd.finish("\n".join(lines))
 
@@ -255,6 +275,32 @@ async def handle_adventure(event: MessageEvent) -> None:
     await adventure_cmd.finish(f"{result.message}\nroll={result.roll_value}\n{reward_line}")
 
 
+@encounter_cmd.handle()
+async def handle_encounter(event: MessageEvent) -> None:
+    try:
+        result = await encounter(event.get_user_id())
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await encounter_cmd.finish("你还未入道，发送“入道”开始。")
+        if reason == "not_enough_stamina":
+            await encounter_cmd.finish("体力不足，暂时承不起这一桩奇遇。")
+        raise
+
+    lines = [
+        f"[{result.world_title}] {result.message}",
+        f"roll={result.roll_value}",
+        f"灵石 {result.spirit_stones_delta:+}，修为 {result.cultivation_delta:+}，体力 {result.stamina_delta}，福缘 {result.fortune_delta:+}。",
+    ]
+    if result.reward_item_name:
+        lines.append(f"额外获得 {result.reward_item_name}。")
+    if result.mastery_method_name and result.mastery_gain:
+        lines.append(f"《{result.mastery_method_name}》熟练 +{result.mastery_gain}。")
+    if result.lifespan_notice:
+        lines.append(result.lifespan_notice)
+    await encounter_cmd.finish("\n".join(lines))
+
+
 @breakthrough_cmd.handle()
 async def handle_breakthrough(event: MessageEvent) -> None:
     try:
@@ -269,15 +315,16 @@ async def handle_breakthrough(event: MessageEvent) -> None:
             await breakthrough_cmd.finish("当前已至此世尽头，后续以转世为主。")
         raise
 
+    lines = [f"[{result.world_title}] roll={result.roll_value} / 成功率约 {result.chance_percent}%"]
     if result.soul_mark_gained:
-        await breakthrough_cmd.finish(f"roll={result.roll_value}，你在天地压迫中凝成了一枚轮回印记。")
-    if result.success:
-        await breakthrough_cmd.finish(
-            f"roll={result.roll_value}，突破成功！ {result.current_realm} -> {result.next_realm}"
-        )
-    await breakthrough_cmd.finish(
-        f"roll={result.roll_value}，突破失败，修为变动 {result.cultivation_delta}。"
-    )
+        lines.append("你在天地压迫中凝成了一枚轮回印记。")
+    elif result.success:
+        lines.append(f"突破成功！ {result.current_realm} -> {result.next_realm}")
+    else:
+        lines.append(f"突破失败，修为变动 {result.cultivation_delta}。")
+    if result.lifespan_notice:
+        lines.append(result.lifespan_notice)
+    await breakthrough_cmd.finish("\n".join(lines))
 
 
 @meditate_cmd.handle()
@@ -301,7 +348,8 @@ async def handle_meditation(event: MessageEvent, args: Message = CommandArg()) -
         raise
 
     await meditate_cmd.finish(
-        f"你已开始闭关 {result.minutes} 分钟，预计至 {result.until} 出关，可获修为 {result.reward}。"
+        f"[{result.world_title}] 你已开始闭关 {result.minutes} 分钟，预计至 {result.until} 出关，可获修为 {result.reward}。"
+        + (f" 主修功法：《{result.method_name}》。 " if result.method_name else "")
     )
 
 
@@ -321,8 +369,61 @@ async def handle_leave_meditation(event: MessageEvent) -> None:
         await leave_meditation_cmd.finish(
             f"闭关尚未结束，还需约 {result.remaining_minutes} 分钟，可得修为 {result.reward}。"
         )
-    await leave_meditation_cmd.finish(
-        f"你已出关，本次闭关 {result.minutes} 分钟，获得修为 {result.reward}。"
+    lines = [f"你已出关，本次闭关 {result.minutes} 分钟，获得修为 {result.reward}。"]
+    if result.method_name and result.mastery_gain:
+        lines.append(f"《{result.method_name}》熟练 +{result.mastery_gain}。")
+    if result.lifespan_notice:
+        lines.append(result.lifespan_notice)
+    await leave_meditation_cmd.finish("\n".join(lines))
+
+
+@consume_cmd.handle()
+async def handle_consume(event: MessageEvent, args: Message = CommandArg()) -> None:
+    item_name = args.extract_plain_text().strip()
+    if not item_name:
+        await consume_cmd.finish("格式：服用 物品名")
+    try:
+        result = await consume_item(event.get_user_id(), item_name)
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await consume_cmd.finish("你还未入道，发送“入道”开始。")
+        if reason == "item_not_found":
+            await consume_cmd.finish("未找到该物品。")
+        if reason == "item_not_consumable":
+            await consume_cmd.finish("这东西不能直接服用。")
+        if reason == "not_enough_items":
+            await consume_cmd.finish("背包数量不足。")
+        raise
+
+    lines = [f"{result.message} 你服用了 {result.item_name}。"]
+    if result.cultivation_delta:
+        lines.append(f"修为 {result.cultivation_delta:+}")
+    if result.stamina_delta:
+        lines.append(f"体力 {result.stamina_delta:+}")
+    if result.lifespan_delta:
+        lines.append(f"寿元上限 {result.lifespan_delta:+}")
+    await consume_cmd.finish("，".join(lines) + "。")
+
+
+@insight_cmd.handle()
+async def handle_insight(event: MessageEvent, args: Message = CommandArg()) -> None:
+    method_name = args.extract_plain_text().strip() or None
+    try:
+        result = await contemplate_method(event.get_user_id(), method_name)
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await insight_cmd.finish("你还未入道，发送“入道”开始。")
+        if reason == "method_not_found":
+            await insight_cmd.finish("未找到可参悟的功法，请先加入宗门或确认功法名。")
+        if reason == "not_enough_fragments":
+            await insight_cmd.finish("缺少吐纳残篇，先去历练或奇遇搜集。")
+        raise
+
+    await insight_cmd.finish(
+        f"[{result.world_title}] 你借残篇参悟《{result.method_name}》，"
+        f"熟练 +{result.mastery_gain}，当前熟练 {result.new_mastery}，修为 +{result.cultivation_gain}。"
     )
 
 
