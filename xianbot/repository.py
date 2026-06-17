@@ -136,6 +136,23 @@ class GameRepository:
             inventory=inventory,
         )
 
+    async def get_player_by_nickname(self, nickname: str) -> Player | None:
+        async with self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT user_id
+                FROM players
+                WHERE nickname = ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (nickname,),
+            )
+        if row is None:
+            return None
+        return await self.get_player(str(row["user_id"]))
+
     async def create_player(self, player: Player) -> Player:
         async with self._connect() as db:
             await db.execute(

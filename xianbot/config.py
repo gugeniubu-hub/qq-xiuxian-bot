@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     method_mastery_meditation_gain: int = Field(default=3)
     method_mastery_adventure_gain: int = Field(default=2)
     method_mastery_encounter_gain: int = Field(default=4)
+    duel_stamina_cost: int = Field(default=18)
+    duel_daily_reward_spirit_stones_min: int = Field(default=28)
+    duel_daily_reward_spirit_stones_max: int = Field(default=66)
 
 
 @lru_cache

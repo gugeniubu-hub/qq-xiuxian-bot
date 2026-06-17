@@ -148,6 +148,78 @@ WORLD_STATE_POOL: tuple[dict[str, Any], ...] = (
     },
 )
 
+ALCHEMY_RECIPES: tuple[dict[str, Any], ...] = (
+    {
+        "name": "聚气丹",
+        "item_id": "qigather",
+        "materials": (
+            ("spirit-herb", "灵草", 2),
+            ("clear-dew", "灵泉水", 1),
+        ),
+        "base_chance": 84,
+        "required_rebirth_count": 0,
+        "favored_affinities": (Affinity.WOOD, Affinity.FIRE),
+        "favored_styles": (MethodStyle.STEADY, MethodStyle.SURGING),
+        "description": "稳定产出修为丹药，适合前中期日常自给。",
+    },
+    {
+        "name": "回灵散",
+        "item_id": "restore-powder",
+        "materials": (
+            ("spirit-herb", "灵草", 1),
+            ("clear-dew", "灵泉水", 1),
+        ),
+        "base_chance": 90,
+        "required_rebirth_count": 0,
+        "favored_affinities": (Affinity.WOOD, Affinity.WATER),
+        "favored_styles": (MethodStyle.STEADY, MethodStyle.INSIGHT),
+        "description": "回复体力，适合历练与斗法前后周转。",
+    },
+    {
+        "name": "凝元丹",
+        "item_id": "essence-pill",
+        "materials": (
+            ("spirit-herb", "灵草", 2),
+            ("clear-dew", "灵泉水", 1),
+            ("flame-sand", "赤焰砂", 1),
+        ),
+        "base_chance": 72,
+        "required_rebirth_count": 0,
+        "favored_affinities": (Affinity.FIRE, Affinity.EARTH),
+        "favored_styles": (MethodStyle.SURGING, MethodStyle.STEADY),
+        "description": "专门为冲关积蓄底蕴，是大境界前的重要储备丹。",
+    },
+    {
+        "name": "悟道丹",
+        "item_id": "insight-pill",
+        "materials": (
+            ("spirit-herb", "灵草", 2),
+            ("clear-dew", "灵泉水", 1),
+            ("moon-dust", "月华粉", 1),
+        ),
+        "base_chance": 68,
+        "required_rebirth_count": 0,
+        "favored_affinities": (Affinity.WATER, Affinity.VOID),
+        "favored_styles": (MethodStyle.INSIGHT, MethodStyle.REBIRTH),
+        "description": "提升道悟，帮助参玄、参悟与后续构筑功法流派。",
+    },
+    {
+        "name": "洗髓丹",
+        "item_id": "marrow-pill",
+        "materials": (
+            ("clear-dew", "灵泉水", 2),
+            ("flame-sand", "赤焰砂", 1),
+            ("moon-dust", "月华粉", 1),
+            ("marrow-jade", "洗髓玉", 1),
+        ),
+        "base_chance": 52,
+        "required_rebirth_count": 1,
+        "favored_affinities": (Affinity.THUNDER, Affinity.VOID),
+        "favored_styles": (MethodStyle.REBIRTH, MethodStyle.INSIGHT),
+        "description": "转世者专属丹药，用来洗练灵根纯度、性情与特质。",
+    },
+)
+
 
 class GameError(ValueError):
     pass
@@ -305,6 +377,40 @@ class PrimaryMethodResult:
     practice_bonus_percent: int
     breakthrough_bonus_percent: int
     insight_bonus_percent: int
+
+
+@dataclass(slots=True)
+class AlchemyResult:
+    item_name: str
+    roll_value: int
+    chance_percent: int
+    success: bool
+    quantity: int
+    world_title: str
+    message: str
+    byproduct_name: str | None = None
+    byproduct_quantity: int = 0
+    insight_gain: int = 0
+
+
+@dataclass(slots=True)
+class DuelResult:
+    attacker_name: str
+    defender_name: str
+    winner_name: str
+    loser_name: str
+    attacker_roll: int
+    defender_roll: int
+    attacker_total: int
+    defender_total: int
+    world_title: str
+    message: str
+    winner_spirit_stones_gain: int
+    winner_cultivation_gain: int
+    winner_insight_gain: int
+    loser_cultivation_loss: int
+    attacker_stamina_delta: int
+    defender_stamina_delta: int
 
 
 def get_repository() -> GameRepository:
@@ -642,6 +748,77 @@ def _insight_multiplier(player: Player, method: dict[str, object] | None) -> flo
     return bonus
 
 
+def _find_alchemy_recipe(recipe_name: str) -> dict[str, Any] | None:
+    target = recipe_name.strip()
+    for recipe in ALCHEMY_RECIPES:
+        if str(recipe["name"]) == target:
+            return dict(recipe)
+    return None
+
+
+def _realm_power(player: Player) -> int:
+    return realm_index(player.realm) * 18 + max(0, player.cultivation // 140)
+
+
+def _duel_style_bonus(method: dict[str, object] | None) -> int:
+    if method is None:
+        return 0
+    style = MethodStyle(str(method["style"]))
+    method_type = MethodType(str(method["method_type"]))
+    bonus = 0
+    if style == MethodStyle.SURGING:
+        bonus += 8
+    elif style == MethodStyle.INSIGHT:
+        bonus += 4
+    elif style == MethodStyle.REBIRTH:
+        bonus += 6
+    if method_type == MethodType.BATTLE:
+        bonus += 10
+    elif method_type == MethodType.BODY:
+        bonus += 7
+    elif method_type == MethodType.REBIRTH:
+        bonus += 5
+    return bonus
+
+
+def _duel_total(player: Player, method: dict[str, object] | None, roll_value: int) -> int:
+    total = roll_value
+    total += _realm_power(player)
+    total += _root_breakthrough_total(player)
+    total += _root_adventure_total(player) // 2
+    total += min(20, player.comprehension // 2)
+    total += min(24, player.insight // 2)
+    total += min(15, player.fortune // 5)
+    total += min(10, player.breakthrough_ready // 6)
+    total += player.rebirth_count * 4
+    total += _duel_style_bonus(method)
+    if method is not None:
+        total += min(24, int(method.get("breakthrough_total", 0)))
+        total += min(18, int(float(method.get("practice_total", 0.0)) * 100 // 2))
+        total += min(12, int(float(method.get("insight_total", 0.0)) * 100 // 3))
+        total += min(14, int(method.get("mastery", 0)) // 18)
+    if player.root_affinity in {Affinity.THUNDER, Affinity.FIRE}:
+        total += 4
+    if player.root_trait == RootTrait.EMBER:
+        total += 5
+    if player.root_trait == RootTrait.WANDERING:
+        total += 3
+    return total
+
+
+async def _resolve_player_target(target: str) -> Player | None:
+    repo = get_repository()
+    normalized = target.strip()
+    if not normalized:
+        return None
+    direct = await repo.get_player(normalized)
+    if direct is not None:
+        return direct
+    if normalized.startswith("@"):
+        normalized = normalized[1:]
+    return await repo.get_player_by_nickname(normalized)
+
+
 async def _apply_method_mastery(
     repo: GameRepository,
     user_id: str,
@@ -813,6 +990,7 @@ async def create_player_if_missing(user_id: str, nickname: str) -> tuple[Player,
     await repo.create_player(player)
     await repo.add_inventory_item(user_id, "qigather", 2)
     await repo.add_inventory_item(user_id, "spirit-herb", 3)
+    await repo.add_inventory_item(user_id, "clear-dew", 2)
     return await repo.get_player(user_id) or player, True
 
 
@@ -998,7 +1176,7 @@ async def adventure(user_id: str) -> AdventureResult:
         insight_delta = 1 if random.random() < 0.35 else 0
         message = "你在历练中斩获颇丰，灵气流转颇为顺畅。"
         if random.random() < 0.35:
-            item_id = "spirit-herb"
+            item_id = random.choice(["spirit-herb", "clear-dew"])
     elif roll_value <= 103:
         cultivation_gain = random.randint(200, 340)
         spirit_stones_gain = random.randint(130, 240)
@@ -1011,6 +1189,8 @@ async def adventure(user_id: str) -> AdventureResult:
             item_id = "method-fragment"
         elif luck_draw < 0.76:
             item_id = "longevity-fruit"
+        elif luck_draw < 0.90:
+            item_id = random.choice(["flame-sand", "moon-dust"])
         else:
             item_id = "qigather"
     else:
@@ -1022,7 +1202,7 @@ async def adventure(user_id: str) -> AdventureResult:
         else:
             message = "你仰见星芒坠落，顺着灵机追索而去，竟得一桩超常机缘。"
         item_id = "method-fragment" if player.rebirth_count < 2 else random.choice(
-            ["method-fragment", "longevity-fruit", "rebirth-mark"]
+            ["method-fragment", "longevity-fruit", "rebirth-mark", "marrow-jade"]
         )
 
     reward_multiplier = _lifespan_reward_multiplier(player)
@@ -1137,7 +1317,7 @@ async def encounter(user_id: str) -> EncounterResult:
         spirit_stones_gain = random.randint(60, 110)
         fortune_delta = 1
         insight_delta = random.randint(1, 2)
-        item_id = random.choice(["qigather", "spirit-herb"])
+        item_id = random.choice(["qigather", "spirit-herb", "clear-dew"])
         message = "你撞见了一场恰到好处的机缘，灵材与感悟一并入手。"
     elif roll_value <= 100:
         cultivation_gain = random.randint(170, 280)
@@ -1145,10 +1325,10 @@ async def encounter(user_id: str) -> EncounterResult:
         fortune_delta = 2
         insight_delta = random.randint(2, 4)
         if player.rebirth_count >= 1:
-            item_id = random.choice(["method-fragment", "longevity-fruit"])
+            item_id = random.choice(["method-fragment", "longevity-fruit", "moon-dust"])
             message = "你在轮回残响中看见古修遗刻，心神一震，收获远超寻常。"
         else:
-            item_id = random.choice(["method-fragment", "qigather"])
+            item_id = random.choice(["method-fragment", "qigather", "flame-sand"])
             message = "你偶得一段前人传音，字句不多，却足够你在仙途上再进一步。"
     else:
         cultivation_gain = random.randint(240, 380)
@@ -1156,10 +1336,10 @@ async def encounter(user_id: str) -> EncounterResult:
         fortune_delta = 3
         insight_delta = random.randint(3, 6)
         if player.rebirth_count >= 2:
-            item_id = random.choice(["rebirth-mark", "longevity-fruit", "method-fragment"])
+            item_id = random.choice(["rebirth-mark", "longevity-fruit", "method-fragment", "marrow-jade"])
             message = "虚市裂缝在你面前一闪而过，你从中换得了一件极罕见的东西。"
         else:
-            item_id = random.choice(["longevity-fruit", "method-fragment"])
+            item_id = random.choice(["longevity-fruit", "method-fragment", "moon-dust"])
             message = "天穹星辉忽然倾泻，你在片刻失神后，竟捧回了一桩大机缘。"
 
     reward_multiplier = _lifespan_reward_multiplier(player)
@@ -1563,7 +1743,14 @@ async def consume_item(user_id: str, item_name: str) -> ConsumeItemResult:
         raise GameError("item_not_consumable")
 
     item_id = str(item["id"])
-    if item_id not in {"qigather", "restore-powder", "longevity-fruit"}:
+    if item_id not in {
+        "qigather",
+        "restore-powder",
+        "longevity-fruit",
+        "essence-pill",
+        "insight-pill",
+        "marrow-pill",
+    }:
         raise GameError("item_not_consumable")
     if not await repo.remove_inventory_item(user_id, item_id, 1):
         raise GameError("not_enough_items")
@@ -1593,7 +1780,250 @@ async def consume_item(user_id: str, item_name: str) -> ConsumeItemResult:
             message="灵果甘凉入体，你感到寿元中的枯意稍稍退去。",
             lifespan_delta=lifespan_delta,
         )
+    if item_id == "essence-pill":
+        breakthrough_delta = random.randint(8, 14) + max(0, player.comprehension // 6)
+        cultivation_delta = random.randint(70, 120)
+        await repo.update_player_stats(
+            user_id,
+            cultivation_delta=cultivation_delta,
+            breakthrough_ready_delta=breakthrough_delta,
+        )
+        return ConsumeItemResult(
+            item_name=str(item["name"]),
+            message=f"丹气沉入气海，你的冲关底蕴提升了 {breakthrough_delta} 点。",
+            cultivation_delta=cultivation_delta,
+        )
+    if item_id == "insight-pill":
+        insight_delta = random.randint(3, 6) + max(0, player.comprehension // 8)
+        cultivation_delta = random.randint(40, 90)
+        await repo.update_player_stats(
+            user_id,
+            cultivation_delta=cultivation_delta,
+            insight_delta=insight_delta,
+        )
+        return ConsumeItemResult(
+            item_name=str(item["name"]),
+            message=f"灵台一清，你的道悟增长了 {insight_delta} 点。",
+            cultivation_delta=cultivation_delta,
+        )
+    if item_id == "marrow-pill":
+        if player.rebirth_count <= 0:
+            await repo.add_inventory_item(user_id, item_id, 1)
+            raise GameError("rebirth_required")
+        updated_fields: dict[str, object] = {}
+        message_parts = ["药力贯通百脉，你的根骨被重新洗练。"]
+        purity_gain = random.randint(2, 6)
+        new_purity = min(99, player.root_purity + purity_gain)
+        updated_fields["root_purity"] = new_purity
+        message_parts.append(f"纯度 +{new_purity - player.root_purity}")
+        if random.random() < 0.55:
+            temperament = _weighted_choice(ROOT_TEMPERAMENT_ROLLS)
+            updated_fields["root_temperament"] = temperament
+            message_parts.append(f"性情转为 {temperament.value}")
+        if random.random() < min(0.75, 0.35 + player.rebirth_count * 0.12):
+            trait = _roll_root_trait(player.rebirth_count + 1)
+            updated_fields["root_trait"] = trait
+            message_parts.append(f"特质显化为 {trait.value}")
+        if random.random() < min(0.42, 0.16 + player.rebirth_count * 0.08):
+            affinity = _roll_root_affinity(player.rebirth_count + 1)
+            updated_fields["root_affinity"] = affinity
+            message_parts.append(f"主属性偏转为 {affinity.value}")
+        await repo.update_player_stats(user_id, **updated_fields)
+        return ConsumeItemResult(
+            item_name=str(item["name"]),
+            message="，".join(message_parts),
+        )
     raise GameError("item_not_consumable")
+
+
+async def craft_elixir(user_id: str, recipe_name: str) -> AlchemyResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+
+    recipe = _find_alchemy_recipe(recipe_name)
+    if recipe is None:
+        raise GameError("recipe_not_found")
+    if player.rebirth_count < int(recipe["required_rebirth_count"]):
+        raise GameError("recipe_locked")
+
+    methods = await _load_methods(repo, player)
+    primary_method = _primary_method(player, methods)
+    materials = tuple(recipe["materials"])
+    for item_id, _, quantity in materials:
+        if player.inventory.get(str(item_id), 0) < int(quantity):
+            raise GameError("not_enough_materials")
+
+    for item_id, _, quantity in materials:
+        removed = await repo.remove_inventory_item(user_id, str(item_id), int(quantity))
+        if not removed:
+            raise GameError("not_enough_materials")
+
+    world_state = await _get_today_world_state()
+    chance = int(recipe["base_chance"])
+    chance += min(12, player.comprehension // 2)
+    chance += min(8, player.insight // 6)
+    chance += min(6, player.rebirth_count * 2)
+    if primary_method is not None:
+        chance += min(8, int(float(primary_method.get("insight_total", 0.0)) * 100 // 4))
+        chance += min(6, int(primary_method.get("mastery", 0)) // 40)
+        if MethodStyle(str(primary_method["style"])) in tuple(recipe["favored_styles"]):
+            chance += 4
+    if player.root_affinity in tuple(recipe["favored_affinities"]):
+        chance += 5
+    if player.root_temperament == RootTemperament.TRANQUIL:
+        chance += 3
+    if player.root_temperament == RootTemperament.ENLIGHTENED:
+        chance += 4
+    if player.root_trait == RootTrait.INSIGHTFUL:
+        chance += 4
+    if world_state.title == "星辉潮":
+        chance += 5
+    elif world_state.title == "流火天":
+        chance += 3
+    chance = max(35, min(chance, 97))
+
+    roll_value = random.randint(1, 100)
+    item_id = str(recipe["item_id"])
+    item = await repo.get_item_by_id(item_id)
+    assert item is not None
+
+    if roll_value <= chance:
+        quantity = 1
+        insight_gain = 0
+        if roll_value <= max(8, chance // 6):
+            quantity = 2
+            insight_gain = 1
+        await repo.add_inventory_item(user_id, item_id, quantity)
+        if insight_gain:
+            await repo.update_player_stats(user_id, insight_delta=insight_gain)
+        return AlchemyResult(
+            item_name=str(item["name"]),
+            roll_value=roll_value,
+            chance_percent=chance,
+            success=True,
+            quantity=quantity,
+            world_title=world_state.title,
+            message="丹炉一震，丹香四散，这一炉炼成了。",
+            insight_gain=insight_gain,
+        )
+
+    byproduct_quantity = 1 if roll_value <= chance + 18 else 2
+    await repo.add_inventory_item(user_id, "pill-dregs", byproduct_quantity)
+    return AlchemyResult(
+        item_name=str(item["name"]),
+        roll_value=roll_value,
+        chance_percent=chance,
+        success=False,
+        quantity=0,
+        world_title=world_state.title,
+        message="火候失衡，药性散乱，这一炉化作了丹渣。",
+        byproduct_name="丹渣",
+        byproduct_quantity=byproduct_quantity,
+    )
+
+
+async def duel(user_id: str, target: str) -> DuelResult:
+    repo = get_repository()
+    attacker = await repo.get_player(user_id)
+    if attacker is None:
+        raise GameError("player_not_found")
+    defender = await _resolve_player_target(target)
+    if defender is None:
+        raise GameError("target_not_found")
+    if defender.user_id == attacker.user_id:
+        raise GameError("cannot_duel_self")
+
+    stamina_cost = get_settings().duel_stamina_cost
+    if attacker.stamina < stamina_cost or defender.stamina < stamina_cost:
+        raise GameError("not_enough_stamina")
+
+    world_state = await _get_today_world_state()
+    attacker_methods = await _load_methods(repo, attacker)
+    defender_methods = await _load_methods(repo, defender)
+    attacker_primary = _primary_method(attacker, attacker_methods)
+    defender_primary = _primary_method(defender, defender_methods)
+
+    attacker_roll = random.randint(1, 100) + world_state.adventure_bonus // 3
+    defender_roll = random.randint(1, 100) + world_state.encounter_bonus // 3
+    attacker_total = _duel_total(attacker, attacker_primary, attacker_roll)
+    defender_total = _duel_total(defender, defender_primary, defender_roll)
+
+    if attacker_total == defender_total:
+        if attacker.fortune >= defender.fortune:
+            attacker_total += 1
+        else:
+            defender_total += 1
+
+    winner = attacker if attacker_total > defender_total else defender
+    loser = defender if winner.user_id == attacker.user_id else attacker
+    winner_method = attacker_primary if winner.user_id == attacker.user_id else defender_primary
+    reward_spirit = random.randint(
+        get_settings().duel_daily_reward_spirit_stones_min,
+        get_settings().duel_daily_reward_spirit_stones_max,
+    ) + max(0, _realm_power(loser) // 8)
+    reward_cultivation = 40 + max(0, abs(attacker_total - defender_total) // 2)
+    reward_insight = 1 if abs(attacker_total - defender_total) >= 18 else 0
+    loser_cultivation_loss = -max(20, reward_cultivation // 2)
+
+    if winner.user_id == attacker.user_id:
+        await repo.update_player_stats(
+            attacker.user_id,
+            spirit_stones_delta=reward_spirit,
+            cultivation_delta=reward_cultivation,
+            insight_delta=reward_insight,
+            stamina_delta=-stamina_cost,
+        )
+        await repo.update_player_stats(
+            defender.user_id,
+            cultivation_delta=loser_cultivation_loss,
+            stamina_delta=-stamina_cost,
+        )
+    else:
+        await repo.update_player_stats(
+            defender.user_id,
+            spirit_stones_delta=reward_spirit,
+            cultivation_delta=reward_cultivation,
+            insight_delta=reward_insight,
+            stamina_delta=-stamina_cost,
+        )
+        await repo.update_player_stats(
+            attacker.user_id,
+            cultivation_delta=loser_cultivation_loss,
+            stamina_delta=-stamina_cost,
+        )
+
+    mastery_gain = 2 + (1 if abs(attacker_total - defender_total) >= 22 else 0)
+    await _apply_method_mastery(repo, winner.user_id, winner_method, mastery_gain)
+    await repo.record_adventure(
+        winner.user_id,
+        action_type="duel",
+        roll_value=max(attacker_roll, defender_roll),
+        outcome=f"{winner.nickname}斗法胜过{loser.nickname}",
+        reward_spirit_stones=reward_spirit,
+        reward_cultivation=reward_cultivation,
+        reward_item_id=None,
+    )
+
+    return DuelResult(
+        attacker_name=attacker.nickname,
+        defender_name=defender.nickname,
+        winner_name=winner.nickname,
+        loser_name=loser.nickname,
+        attacker_roll=attacker_roll,
+        defender_roll=defender_roll,
+        attacker_total=attacker_total,
+        defender_total=defender_total,
+        world_title=world_state.title,
+        message="灵机交锋，胜负在一息之间见了分晓。",
+        winner_spirit_stones_gain=reward_spirit,
+        winner_cultivation_gain=reward_cultivation,
+        winner_insight_gain=reward_insight,
+        loser_cultivation_loss=loser_cultivation_loss,
+        attacker_stamina_delta=-stamina_cost,
+        defender_stamina_delta=-stamina_cost,
+    )
 
 
 async def contemplate_method(user_id: str, method_name: str | None = None) -> MethodInsightResult:

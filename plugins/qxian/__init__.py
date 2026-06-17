@@ -18,8 +18,10 @@ from xianbot.services import (
     buy_market_listing,
     contemplate_method,
     consume_item,
+    craft_elixir,
     create_market_listing,
     create_player_if_missing,
+    duel,
     encounter,
     end_meditation,
     get_player_methods,
@@ -60,6 +62,8 @@ meditate_cmd = on_command("闭关")
 leave_meditation_cmd = on_command("出关")
 consume_cmd = on_command("服用")
 insight_cmd = on_command("参悟")
+alchemy_cmd = on_command("炼丹")
+duel_cmd = on_command("斗法", aliases={"pk", "PK"})
 market_list_cmd = on_command("坊市")
 market_create_cmd = on_command("坊市上架")
 market_buy_cmd = on_command("坊市购买", aliases={"购买"})
@@ -74,6 +78,18 @@ async def startup() -> None:
 
 def _meditation_usage() -> str:
     return "闭关 [分钟] [吐纳|凝练|参玄|冲关]，例如：闭关 45 参玄"
+
+
+def _duel_target_text(args: Message) -> str:
+    plain = args.extract_plain_text().strip()
+    if plain:
+        return plain
+    for seg in args:
+        if seg.type == "at":
+            qq = seg.data.get("qq")
+            if qq:
+                return str(qq)
+    return ""
 
 
 @help_cmd.handle()
@@ -464,6 +480,8 @@ async def handle_consume(event: MessageEvent, args: Message = CommandArg()) -> N
             await consume_cmd.finish("未找到该物品。")
         if reason == "item_not_consumable":
             await consume_cmd.finish("这东西不能直接服用。")
+        if reason == "rebirth_required":
+            await consume_cmd.finish("洗髓丹药力太烈，至少一转之后再服用。")
         if reason == "not_enough_items":
             await consume_cmd.finish("背包数量不足。")
         raise
@@ -476,6 +494,38 @@ async def handle_consume(event: MessageEvent, args: Message = CommandArg()) -> N
     if result.lifespan_delta:
         lines.append(f"寿元上限 {result.lifespan_delta:+}")
     await consume_cmd.finish("，".join(lines) + "。")
+
+
+@alchemy_cmd.handle()
+async def handle_alchemy(event: MessageEvent, args: Message = CommandArg()) -> None:
+    recipe_name = args.extract_plain_text().strip()
+    if not recipe_name:
+        await alchemy_cmd.finish("格式：炼丹 丹药名，例如：炼丹 凝元丹")
+    try:
+        result = await craft_elixir(event.get_user_id(), recipe_name)
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await alchemy_cmd.finish("你还未入道，发送“入道”开始。")
+        if reason == "recipe_not_found":
+            await alchemy_cmd.finish("未找到这张丹方。当前建议尝试：聚气丹 / 回灵散 / 凝元丹 / 悟道丹 / 洗髓丹")
+        if reason == "recipe_locked":
+            await alchemy_cmd.finish("这张丹方需要转世后才能稳住药力。")
+        if reason == "not_enough_materials":
+            await alchemy_cmd.finish("灵材不足，先去历练、奇遇或坊市再备料。")
+        raise
+
+    lines = [
+        f"[{result.world_title}] {result.message}",
+        f"目标丹药《{result.item_name}》 | roll={result.roll_value} / 成丹率约 {result.chance_percent}%",
+    ]
+    if result.success:
+        lines.append(f"获得 {result.item_name} x{result.quantity}。")
+        if result.insight_gain:
+            lines.append(f"炼丹反哺心神，道悟 +{result.insight_gain}。")
+    elif result.byproduct_name:
+        lines.append(f"获得副产物 {result.byproduct_name} x{result.byproduct_quantity}。")
+    await alchemy_cmd.finish("\n".join(lines))
 
 
 @insight_cmd.handle()
@@ -502,6 +552,38 @@ async def handle_insight(event: MessageEvent, args: Message = CommandArg()) -> N
     if result.breakthrough_ready_gain:
         lines.append(f"冲关底蕴 +{result.breakthrough_ready_gain}。")
     await insight_cmd.finish("\n".join(lines))
+
+
+@duel_cmd.handle()
+async def handle_duel(event: MessageEvent, args: Message = CommandArg()) -> None:
+    target = _duel_target_text(args)
+    if not target:
+        await duel_cmd.finish("格式：斗法 @目标 或 斗法 QQ号")
+    try:
+        result = await duel(event.get_user_id(), target)
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await duel_cmd.finish("你还未入道，发送“入道”开始。")
+        if reason == "target_not_found":
+            await duel_cmd.finish("未找到斗法目标，对方需要先入道。")
+        if reason == "cannot_duel_self":
+            await duel_cmd.finish("对着自己出手，容易走火入魔。")
+        if reason == "not_enough_stamina":
+            await duel_cmd.finish("有一方体力不足，今日这场斗法暂时开不了。")
+        raise
+
+    await duel_cmd.finish(
+        "\n".join(
+            [
+                f"[{result.world_title}] {result.message}",
+                f"{result.attacker_name}: roll={result.attacker_roll} | 总势 {result.attacker_total}",
+                f"{result.defender_name}: roll={result.defender_roll} | 总势 {result.defender_total}",
+                f"胜者 {result.winner_name}，获灵石 +{result.winner_spirit_stones_gain}，修为 +{result.winner_cultivation_gain}，道悟 +{result.winner_insight_gain}。",
+                f"败者 {result.loser_name}，修为 {result.loser_cultivation_loss}，双方体力各消耗 {abs(result.attacker_stamina_delta)}。",
+            ]
+        )
+    )
 
 
 @market_list_cmd.handle()

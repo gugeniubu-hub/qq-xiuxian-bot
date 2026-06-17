@@ -8,8 +8,10 @@ from xianbot.services import (
     adventure,
     breakthrough,
     contemplate_method,
+    craft_elixir,
     create_market_listing,
     create_player_if_missing,
+    duel,
     encounter,
     end_meditation,
     get_player_methods,
@@ -177,6 +179,77 @@ def test_breakthrough_unlocks_sect_method(tmp_path, monkeypatch) -> None:
 
         methods = await get_player_methods("10005")
         assert any(method["name"] == "青岚养心篇" for method in methods)
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_alchemy_and_duel_gameplay(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian6.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("10006", "tester6")
+        await create_player_if_missing("10007", "tester7")
+        await join_sect("10006", "赤霄门")
+        await join_sect("10007", "青岚宗")
+
+        repo = GameRepository(get_settings().database_url)
+        await repo.add_inventory_item("10006", "spirit-herb", 3)
+        await repo.add_inventory_item("10006", "clear-dew", 2)
+        await repo.add_inventory_item("10006", "flame-sand", 1)
+
+        import xianbot.services as services
+
+        alchemy_randint = services.random.randint
+        services.random.randint = lambda a, b: 7
+        try:
+            alchemy = await craft_elixir("10006", "凝元丹")
+        finally:
+            services.random.randint = alchemy_randint
+
+        assert alchemy.success is True
+        assert alchemy.item_name == "凝元丹"
+        bag = await list_inventory("10006")
+        assert any(item["name"] == "凝元丹" for item in bag)
+
+        await repo.update_player_stats(
+            "10006",
+            realm=Realm.FOUNDATION_2,
+            cultivation_delta=1500,
+            insight_delta=24,
+            breakthrough_ready_delta=35,
+            fortune_delta=18,
+        )
+        await repo.update_player_stats(
+            "10007",
+            realm=Realm.QI_4,
+            cultivation_delta=600,
+            insight_delta=6,
+            breakthrough_ready_delta=8,
+            fortune_delta=5,
+        )
+
+        sequence = iter([88, 36, 52])
+        duel_randint = services.random.randint
+        services.random.randint = lambda a, b: next(sequence)
+        try:
+            duel_result = await duel("10006", "10007")
+        finally:
+            services.random.randint = duel_randint
+
+        assert duel_result.winner_name == "tester6"
+        assert duel_result.winner_spirit_stones_gain >= 52
+
+        winner = await get_player_status("10006")
+        loser = await get_player_status("10007")
+        assert winner is not None
+        assert loser is not None
+        assert winner.spirit_stones >= 300 + duel_result.winner_spirit_stones_gain
+        assert loser.cultivation >= 0
+        assert loser.stamina < 100
 
     asyncio.run(scenario())
     get_settings.cache_clear()
