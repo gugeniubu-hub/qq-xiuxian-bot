@@ -16,6 +16,7 @@ from xianbot.services import (
     adventure,
     breakthrough,
     buy_market_listing,
+    claim_today_world_event_reward,
     get_destiny_status,
     contemplate_method,
     consume_item,
@@ -28,6 +29,7 @@ from xianbot.services import (
     get_player_methods,
     get_player_status,
     get_rankings,
+    get_today_world_event,
     get_today_world_state,
     join_sect,
     list_inventory,
@@ -71,6 +73,8 @@ market_create_cmd = on_command("坊市上架")
 market_buy_cmd = on_command("坊市购买", aliases={"购买"})
 ranking_cmd = on_command("排行", aliases={"排行榜"})
 world_cmd = on_command("天象", aliases={"今日天象", "世界状态"})
+world_event_cmd = on_command("世界事件", aliases={"今日事件", "天命事件"})
+world_event_claim_cmd = on_command("领取事件", aliases={"领取天命", "事件领奖"})
 
 
 @driver.on_startup
@@ -107,6 +111,48 @@ async def handle_world_state() -> None:
         f"历练修正 {result.adventure_bonus:+} | 奇遇修正 {result.encounter_bonus:+} | "
         f"闭关修正 {int(result.meditation_bonus * 100):+}%"
     )
+
+
+@world_event_cmd.handle()
+async def handle_world_event(event: MessageEvent) -> None:
+    result = await get_today_world_event(event.get_user_id())
+    status = "已完成" if result.completed else f"{result.current_progress}/{result.target_progress}"
+    lines = [
+        f"今日事件：{result.title}",
+        result.description,
+        f"目标：{result.objective}",
+        f"进度：{status}",
+        f"事件加成：{result.bonus_text}",
+        f"参与方式：{result.participation_hint}",
+        f"个人贡献：{result.player_contribution}" + (" | 已领奖" if result.claimed else ""),
+        f"完成奖励：{result.reward_summary}",
+    ]
+    await world_event_cmd.finish("\n".join(lines))
+
+
+@world_event_claim_cmd.handle()
+async def handle_world_event_claim(event: MessageEvent) -> None:
+    try:
+        result = await claim_today_world_event_reward(event.get_user_id())
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await world_event_claim_cmd.finish("你还未入道，发送“入道”开始。")
+        if reason == "world_event_not_completed":
+            await world_event_claim_cmd.finish("今日世界事件尚未完成，先和群友一起推进。")
+        if reason == "not_participated":
+            await world_event_claim_cmd.finish("你今日尚未参与该世界事件，先去出一份力。")
+        if reason == "already_claimed":
+            await world_event_claim_cmd.finish("你今日的事件奖励已经领过了。")
+        raise
+    lines = [
+        f"你已领取《{result.title}》奖励。",
+        f"个人贡献：{result.contribution}",
+        f"灵石 +{result.reward_spirit_stones} | 修为 +{result.reward_cultivation} | 道悟 +{result.reward_insight}",
+    ]
+    if result.reward_item_name and result.reward_item_quantity:
+        lines.append(f"额外获得 {result.reward_item_name} x{result.reward_item_quantity}。")
+    await world_event_claim_cmd.finish("\n".join(lines))
 
 
 @design_cmd.handle()
@@ -363,6 +409,8 @@ async def handle_adventure(event: MessageEvent) -> None:
         lines.append(f"《{result.mastery_method_name}》熟练 +{result.mastery_gain}。")
     if result.lifespan_notice:
         lines.append(result.lifespan_notice)
+    if result.event_notice:
+        lines.append(result.event_notice)
     await adventure_cmd.finish("\n".join(lines))
 
 
@@ -391,6 +439,8 @@ async def handle_encounter(event: MessageEvent) -> None:
         lines.append(f"《{result.mastery_method_name}》熟练 +{result.mastery_gain}。")
     if result.lifespan_notice:
         lines.append(result.lifespan_notice)
+    if result.event_notice:
+        lines.append(result.event_notice)
     await encounter_cmd.finish("\n".join(lines))
 
 
@@ -423,6 +473,8 @@ async def handle_breakthrough(event: MessageEvent) -> None:
         lines.append(f"宗门传承感应而至：{'、'.join(result.unlocked_methods)}。")
     if result.lifespan_notice:
         lines.append(result.lifespan_notice)
+    if result.event_notice:
+        lines.append(result.event_notice)
     await breakthrough_cmd.finish("\n".join(lines))
 
 
@@ -490,6 +542,8 @@ async def handle_leave_meditation(event: MessageEvent) -> None:
         lines.append(f"《{result.method_name}》熟练 +{result.mastery_gain}。")
     if result.lifespan_notice:
         lines.append(result.lifespan_notice)
+    if result.event_notice:
+        lines.append(result.event_notice)
     await leave_meditation_cmd.finish("\n".join(lines))
 
 
@@ -553,6 +607,8 @@ async def handle_alchemy(event: MessageEvent, args: Message = CommandArg()) -> N
             lines.append(f"炼丹反哺心神，道悟 +{result.insight_gain}。")
     elif result.byproduct_name:
         lines.append(f"获得副产物 {result.byproduct_name} x{result.byproduct_quantity}。")
+    if result.event_notice:
+        lines.append(result.event_notice)
     await alchemy_cmd.finish("\n".join(lines))
 
 
@@ -579,6 +635,8 @@ async def handle_insight(event: MessageEvent, args: Message = CommandArg()) -> N
         lines.append(f"道悟 +{result.insight_gain}。")
     if result.breakthrough_ready_gain:
         lines.append(f"冲关底蕴 +{result.breakthrough_ready_gain}。")
+    if result.event_notice:
+        lines.append(result.event_notice)
     await insight_cmd.finish("\n".join(lines))
 
 
@@ -609,6 +667,7 @@ async def handle_duel(event: MessageEvent, args: Message = CommandArg()) -> None
                 f"{result.defender_name}: roll={result.defender_roll} | 总势 {result.defender_total}",
                 f"胜者 {result.winner_name}，获灵石 +{result.winner_spirit_stones_gain}，修为 +{result.winner_cultivation_gain}，道悟 +{result.winner_insight_gain}。",
                 f"败者 {result.loser_name}，修为 {result.loser_cultivation_loss}，双方体力各消耗 {abs(result.attacker_stamina_delta)}。",
+                *( [result.event_notice] if result.event_notice else [] ),
             ]
         )
     )

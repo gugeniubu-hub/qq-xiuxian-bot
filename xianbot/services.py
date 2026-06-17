@@ -167,6 +167,130 @@ WORLD_STATE_POOL: tuple[dict[str, Any], ...] = (
     },
 )
 
+WORLD_EVENT_POOL: tuple[dict[str, Any], ...] = (
+    {
+        "event_key": "secret-realm",
+        "title": "玄脉秘境开启",
+        "description": "群山地脉松动，一处正在成形的秘境裂口显化于世，需众修尽快稳住入口。",
+        "objective": "通过历练清剿外围异兽、稳固秘境入口。",
+        "focus_actions": ("adventure",),
+        "base_target": 20,
+        "target_variation": 6,
+        "reward_spirit_stones": 180,
+        "reward_cultivation": 260,
+        "reward_insight": 1,
+        "reward_item_id": "spirit-herb",
+        "reward_item_quantity": 2,
+        "bonus_text": "历练额外获得修为与灵石，适合全群冲进度。",
+        "participation_hint": "多用“历练”推进进度。",
+        "bonus_values": {
+            "adventure_cultivation": 0.12,
+            "adventure_spirit": 0.10,
+        },
+    },
+    {
+        "event_key": "ruin-echo",
+        "title": "残碑道藏出世",
+        "description": "古碑虚影自天外坠下，碑文碎片散落四方，正是奇遇频发之时。",
+        "objective": "通过奇遇搜集残碑气机，拼合本日道藏。",
+        "focus_actions": ("encounter",),
+        "base_target": 18,
+        "target_variation": 5,
+        "reward_spirit_stones": 150,
+        "reward_cultivation": 220,
+        "reward_insight": 2,
+        "reward_item_id": "method-fragment",
+        "reward_item_quantity": 1,
+        "bonus_text": "奇遇期间更易增福缘与道悟，适合搏一手高波动收益。",
+        "participation_hint": "多用“奇遇”搜集残碑气机。",
+        "bonus_values": {
+            "encounter_fortune": 1,
+            "encounter_insight": 1,
+        },
+    },
+    {
+        "event_key": "pill-tide",
+        "title": "丹炉潮升",
+        "description": "天地药性活跃，火候更易相合，诸多丹师都在争抢今日的成丹良机。",
+        "objective": "通过炼丹积蓄药潮，催生今日丹脉回响。",
+        "focus_actions": ("alchemy",),
+        "base_target": 14,
+        "target_variation": 4,
+        "reward_spirit_stones": 160,
+        "reward_cultivation": 180,
+        "reward_insight": 1,
+        "reward_item_id": "flame-sand",
+        "reward_item_quantity": 1,
+        "bonus_text": "炼丹成功率更高，成丹后更容易反哺心神。",
+        "participation_hint": "多用“炼丹”推进药潮进度。",
+        "bonus_values": {
+            "alchemy_chance": 7,
+            "alchemy_insight": 1,
+        },
+    },
+    {
+        "event_key": "doctrine-conclave",
+        "title": "论道法会",
+        "description": "诸修同观天痕，法会共鸣之下，闭关与参悟都更容易触及关键处。",
+        "objective": "通过参悟与参玄闭关积累论道余韵，完成今日法会。",
+        "focus_actions": ("insight", "meditation_insight"),
+        "base_target": 16,
+        "target_variation": 5,
+        "reward_spirit_stones": 130,
+        "reward_cultivation": 260,
+        "reward_insight": 3,
+        "reward_item_id": "method-fragment",
+        "reward_item_quantity": 1,
+        "bonus_text": "参悟熟练增长更快，参玄闭关的道悟产出也更高。",
+        "participation_hint": "用“参悟”或“闭关 参玄”共同推进法会。",
+        "bonus_values": {
+            "contemplate_mastery": 4,
+            "meditation_insight": 2,
+        },
+    },
+    {
+        "event_key": "demon-incursion",
+        "title": "邪修犯境",
+        "description": "边境灵脉震荡，群修需以斗法镇压煞气，今日胜负不仅关乎个人颜面。",
+        "objective": "通过斗法压制邪氛，守住今日灵脉。",
+        "focus_actions": ("duel",),
+        "base_target": 12,
+        "target_variation": 4,
+        "reward_spirit_stones": 220,
+        "reward_cultivation": 320,
+        "reward_insight": 1,
+        "reward_item_id": "essence-pill",
+        "reward_item_quantity": 1,
+        "bonus_text": "斗法胜者额外获得灵石与修为，适合群里切磋带动事件。",
+        "participation_hint": "多用“斗法 @目标”压制邪氛。",
+        "bonus_values": {
+            "duel_spirit": 40,
+            "duel_cultivation": 30,
+        },
+    },
+    {
+        "event_key": "heaven-gate",
+        "title": "天关共鸣",
+        "description": "天地关隘短暂松动，冲关修士与闭关凝练者都能借这一线天机前行。",
+        "objective": "通过突破与冲关闭关引动天关共鸣，完成今日天机汇聚。",
+        "focus_actions": ("breakthrough", "meditation_breakthrough"),
+        "base_target": 12,
+        "target_variation": 4,
+        "reward_spirit_stones": 180,
+        "reward_cultivation": 300,
+        "reward_insight": 2,
+        "reward_item_id": "essence-pill",
+        "reward_item_quantity": 1,
+        "bonus_text": "突破成功率更高，冲关闭关更能积蓄底蕴。",
+        "participation_hint": "用“突破”或“闭关 冲关”共同引动天关。",
+        "bonus_values": {
+            "breakthrough_chance": 6,
+            "breakthrough_guard": 4,
+            "meditation_breakthrough_multiplier": 0.25,
+        },
+    },
+)
+
 ALCHEMY_RECIPES: tuple[dict[str, Any], ...] = (
     {
         "name": "聚气丹",
@@ -282,6 +406,33 @@ class WorldStateResult:
 
 
 @dataclass(slots=True)
+class WorldEventResult:
+    event_date: str
+    title: str
+    description: str
+    objective: str
+    current_progress: int
+    target_progress: int
+    completed: bool
+    bonus_text: str
+    participation_hint: str
+    reward_summary: str
+    player_contribution: int = 0
+    claimed: bool = False
+
+
+@dataclass(slots=True)
+class WorldEventClaimResult:
+    title: str
+    contribution: int
+    reward_spirit_stones: int
+    reward_cultivation: int
+    reward_insight: int
+    reward_item_name: str | None = None
+    reward_item_quantity: int = 0
+
+
+@dataclass(slots=True)
 class AdventureResult:
     roll_value: int
     message: str
@@ -294,6 +445,7 @@ class AdventureResult:
     mastery_gain: int = 0
     insight_delta: int = 0
     lifespan_notice: str | None = None
+    event_notice: str | None = None
 
 
 @dataclass(slots=True)
@@ -310,6 +462,7 @@ class EncounterResult:
     mastery_gain: int = 0
     insight_delta: int = 0
     lifespan_notice: str | None = None
+    event_notice: str | None = None
 
 
 @dataclass(slots=True)
@@ -325,6 +478,7 @@ class BreakthroughResult:
     lifespan_notice: str | None = None
     unlocked_methods: list[str] = field(default_factory=list)
     preparation_cost: int = 0
+    event_notice: str | None = None
 
 
 @dataclass(slots=True)
@@ -351,6 +505,7 @@ class MeditationClaimResult:
     mode_name: str | None = None
     insight_gain: int = 0
     breakthrough_ready_gain: int = 0
+    event_notice: str | None = None
 
 
 @dataclass(slots=True)
@@ -389,6 +544,7 @@ class MethodInsightResult:
     world_title: str
     insight_gain: int = 0
     breakthrough_ready_gain: int = 0
+    event_notice: str | None = None
 
 
 @dataclass(slots=True)
@@ -419,6 +575,7 @@ class AlchemyResult:
     byproduct_name: str | None = None
     byproduct_quantity: int = 0
     insight_gain: int = 0
+    event_notice: str | None = None
 
 
 @dataclass(slots=True)
@@ -439,6 +596,7 @@ class DuelResult:
     loser_cultivation_loss: int
     attacker_stamina_delta: int
     defender_stamina_delta: int
+    event_notice: str | None = None
 
 
 def get_repository() -> GameRepository:
@@ -1013,6 +1171,28 @@ def _generate_world_state(state_date: str) -> dict[str, Any]:
     return dict(rng.choice(WORLD_STATE_POOL))
 
 
+def _generate_world_event(state_date: str) -> dict[str, Any]:
+    rng = random.Random(f"qxian-event-{state_date}")
+    template = dict(rng.choice(WORLD_EVENT_POOL))
+    variation = int(template["target_variation"])
+    target_progress = int(template["base_target"]) + rng.randint(0, variation)
+    return {
+        "event_key": template["event_key"],
+        "title": template["title"],
+        "description": template["description"],
+        "objective": template["objective"],
+        "target_progress": target_progress,
+        "current_progress": 0,
+        "reward_spirit_stones": int(template["reward_spirit_stones"]),
+        "reward_cultivation": int(template["reward_cultivation"]),
+        "reward_insight": int(template["reward_insight"]),
+        "reward_item_id": template["reward_item_id"],
+        "reward_item_quantity": int(template["reward_item_quantity"]),
+        "bonus_text": template["bonus_text"],
+        "participation_hint": template["participation_hint"],
+    }
+
+
 async def _get_today_world_state() -> WorldStateResult:
     repo = get_repository()
     state_date = _today().isoformat()
@@ -1038,6 +1218,129 @@ async def _get_today_world_state() -> WorldStateResult:
         fortune_bonus=int(state["fortune_bonus"]),
         lifespan_bonus=int(state["lifespan_bonus"]),
     )
+
+
+async def _get_today_world_event() -> dict[str, Any]:
+    repo = get_repository()
+    event_date = _today().isoformat()
+    event = await repo.get_world_event(event_date)
+    if event is None:
+        event = _generate_world_event(event_date)
+        await repo.save_world_event(
+            event_date=event_date,
+            event_key=str(event["event_key"]),
+            title=str(event["title"]),
+            description=str(event["description"]),
+            objective=str(event["objective"]),
+            target_progress=int(event["target_progress"]),
+            current_progress=int(event["current_progress"]),
+            reward_spirit_stones=int(event["reward_spirit_stones"]),
+            reward_cultivation=int(event["reward_cultivation"]),
+            reward_insight=int(event["reward_insight"]),
+            reward_item_id=None if event["reward_item_id"] is None else str(event["reward_item_id"]),
+            reward_item_quantity=int(event["reward_item_quantity"]),
+            bonus_text=str(event["bonus_text"]),
+            participation_hint=str(event["participation_hint"]),
+        )
+    return event
+
+
+def _world_event_template(event_key: str) -> dict[str, Any]:
+    for template in WORLD_EVENT_POOL:
+        if str(template["event_key"]) == event_key:
+            return dict(template)
+    return {}
+
+
+def _world_event_bonus_values(event_key: str) -> dict[str, Any]:
+    template = _world_event_template(event_key)
+    return dict(template.get("bonus_values", {}))
+
+
+def _world_event_matches_action(event_key: str, action_type: str) -> bool:
+    template = _world_event_template(event_key)
+    focus_actions = tuple(str(item) for item in template.get("focus_actions", ()))
+    return action_type in focus_actions
+
+
+def _world_event_contribution_amount(
+    player: Player,
+    action_type: str,
+    *,
+    success: bool = True,
+    quantity: int = 1,
+) -> int:
+    base_map = {
+        "adventure": 2,
+        "encounter": 2,
+        "alchemy": 2 if success else 1,
+        "insight": 2,
+        "meditation_insight": 2,
+        "meditation_breakthrough": 2,
+        "duel": 2,
+        "breakthrough": 2 if success else 1,
+    }
+    contribution = base_map.get(action_type, 1)
+    contribution += min(2, player.rebirth_count // 2)
+    if action_type == "alchemy" and quantity >= 2:
+        contribution += 1
+    if action_type == "breakthrough" and success:
+        contribution += 1
+    return max(1, contribution)
+
+
+async def _world_event_reward_summary(
+    repo: GameRepository,
+    event: dict[str, Any],
+) -> str:
+    parts: list[str] = []
+    if int(event["reward_spirit_stones"]) > 0:
+        parts.append(f"灵石 {int(event['reward_spirit_stones'])}")
+    if int(event["reward_cultivation"]) > 0:
+        parts.append(f"修为 {int(event['reward_cultivation'])}")
+    if int(event["reward_insight"]) > 0:
+        parts.append(f"道悟 {int(event['reward_insight'])}")
+    reward_item_id = event.get("reward_item_id")
+    reward_item_quantity = int(event.get("reward_item_quantity", 0))
+    if reward_item_id is not None and reward_item_quantity > 0:
+        item = await repo.get_item_by_id(str(reward_item_id))
+        item_name = str(reward_item_id) if item is None else str(item["name"])
+        parts.append(f"{item_name} x{reward_item_quantity}")
+    return " / ".join(parts) if parts else "暂无奖励"
+
+
+async def _record_world_event_progress(
+    player: Player,
+    action_type: str,
+    *,
+    success: bool = True,
+    quantity: int = 1,
+) -> str | None:
+    repo = get_repository()
+    event = await _get_today_world_event()
+    event_key = str(event["event_key"])
+    if not _world_event_matches_action(event_key, action_type):
+        return None
+    contribution = _world_event_contribution_amount(
+        player,
+        action_type,
+        success=success,
+        quantity=quantity,
+    )
+    progress = await repo.contribute_world_event(
+        event_date=_today().isoformat(),
+        user_id=player.user_id,
+        contribution=contribution,
+    )
+    if progress is None:
+        return None
+    notice = (
+        f"世界事件《{event['title']}》推进 +{contribution}，"
+        f"当前 {int(progress['current_progress'])}/{int(progress['target_progress'])}。"
+    )
+    if bool(progress["completed"]):
+        notice += " 今日事件已完成，可发送“领取事件”结算。"
+    return notice
 
 
 async def _load_methods(repo: GameRepository, player: Player) -> list[dict[str, object]]:
@@ -1156,6 +1459,64 @@ async def get_destiny_status(user_id: str) -> DestinyResult:
 
 async def get_today_world_state() -> WorldStateResult:
     return await _get_today_world_state()
+
+
+async def get_today_world_event(user_id: str | None = None) -> WorldEventResult:
+    repo = get_repository()
+    event = await _get_today_world_event()
+    player = None if user_id is None else await repo.get_player(user_id)
+    contribution = 0
+    claimed = False
+    if player is not None:
+        row = await repo.get_world_event_contribution(_today().isoformat(), user_id)
+        if row is not None:
+            contribution = int(row["contribution"])
+            claimed = int(row["claimed"]) == 1
+    return WorldEventResult(
+        event_date=_today().isoformat(),
+        title=str(event["title"]),
+        description=str(event["description"]),
+        objective=str(event["objective"]),
+        current_progress=int(event["current_progress"]),
+        target_progress=int(event["target_progress"]),
+        completed=bool(event.get("completed_at")),
+        bonus_text=str(event["bonus_text"]),
+        participation_hint=str(event["participation_hint"]),
+        reward_summary=await _world_event_reward_summary(repo, event),
+        player_contribution=contribution,
+        claimed=claimed,
+    )
+
+
+async def claim_today_world_event_reward(user_id: str) -> WorldEventClaimResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+    event_date = _today().isoformat()
+    claimed = await repo.claim_world_event_reward(event_date=event_date, user_id=user_id)
+    if claimed is None:
+        raise GameError("world_event_not_completed")
+    reason = claimed.get("reason")
+    if reason is not None:
+        raise GameError(str(reason))
+
+    reward_item_name: str | None = None
+    reward_item_id = claimed.get("reward_item_id")
+    reward_item_quantity = int(claimed.get("reward_item_quantity", 0))
+    if reward_item_id is not None and reward_item_quantity > 0:
+        item = await repo.get_item_by_id(str(reward_item_id))
+        reward_item_name = str(reward_item_id) if item is None else str(item["name"])
+
+    return WorldEventClaimResult(
+        title=str(claimed["title"]),
+        contribution=int(claimed["contribution"]),
+        reward_spirit_stones=int(claimed["reward_spirit_stones"]),
+        reward_cultivation=int(claimed["reward_cultivation"]),
+        reward_insight=int(claimed["reward_insight"]),
+        reward_item_name=reward_item_name,
+        reward_item_quantity=reward_item_quantity,
+    )
 
 
 async def list_sects_for_player(user_id: str) -> list[dict[str, object]]:
@@ -1282,6 +1643,8 @@ async def adventure(user_id: str) -> AdventureResult:
 
     methods = await _load_methods(repo, player)
     world_state = await _get_today_world_state()
+    world_event = await _get_today_world_event()
+    event_bonus_values = _world_event_bonus_values(str(world_event["event_key"]))
     primary_method = _primary_method(player, methods)
     roll_value = (
         random.randint(1, 100)
@@ -1349,8 +1712,10 @@ async def adventure(user_id: str) -> AdventureResult:
         cultivation_gain = int(
             cultivation_gain * (1 + _training_multiplier(player, primary_method))
         )
+        cultivation_gain += int(cultivation_gain * float(event_bonus_values.get("adventure_cultivation", 0.0)))
     if spirit_stones_gain > 0:
         spirit_stones_gain = int(spirit_stones_gain * reward_multiplier)
+        spirit_stones_gain += int(spirit_stones_gain * float(event_bonus_values.get("adventure_spirit", 0.0)))
 
     if insight_delta > 0:
         insight_delta = max(
@@ -1393,6 +1758,7 @@ async def adventure(user_id: str) -> AdventureResult:
         player,
         settings.lifespan_progress_per_adventure + world_state.lifespan_bonus,
     )
+    event_notice = await _record_world_event_progress(player, "adventure")
 
     return AdventureResult(
         roll_value=roll_value,
@@ -1406,6 +1772,7 @@ async def adventure(user_id: str) -> AdventureResult:
         mastery_gain=applied_mastery,
         insight_delta=insight_delta,
         lifespan_notice=lifespan_notice,
+        event_notice=event_notice,
     )
 
 
@@ -1423,6 +1790,8 @@ async def encounter(user_id: str) -> EncounterResult:
     methods = await _load_methods(repo, player)
     primary_method = _primary_method(player, methods)
     world_state = await _get_today_world_state()
+    world_event = await _get_today_world_event()
+    event_bonus_values = _world_event_bonus_values(str(world_event["event_key"]))
     roll_value = (
         random.randint(1, 100)
         + (player.fortune + _destiny_fortune_bonus(player)) // 8
@@ -1493,6 +1862,8 @@ async def encounter(user_id: str) -> EncounterResult:
             1,
             int(insight_delta * (1 + _insight_multiplier(player, primary_method))),
         )
+    fortune_delta += int(event_bonus_values.get("encounter_fortune", 0))
+    insight_delta += int(event_bonus_values.get("encounter_insight", 0))
 
     if item_id is not None:
         item = await repo.get_item_by_id(item_id)
@@ -1530,6 +1901,7 @@ async def encounter(user_id: str) -> EncounterResult:
         player,
         settings.lifespan_progress_per_encounter + world_state.lifespan_bonus,
     )
+    event_notice = await _record_world_event_progress(player, "encounter")
 
     return EncounterResult(
         roll_value=roll_value,
@@ -1544,6 +1916,7 @@ async def encounter(user_id: str) -> EncounterResult:
         mastery_gain=applied_mastery,
         insight_delta=insight_delta,
         lifespan_notice=lifespan_notice,
+        event_notice=event_notice,
     )
 
 
@@ -1569,6 +1942,8 @@ async def start_meditation(
     methods = await _load_methods(repo, player)
     primary_method = _primary_method(player, methods)
     world_state = await _get_today_world_state()
+    world_event = await _get_today_world_event()
+    event_bonus_values = _world_event_bonus_values(str(world_event["event_key"]))
 
     base_reward = minutes * (6 + player.comprehension / 4 + player.insight / 20)
     reward = int(
@@ -1604,6 +1979,12 @@ async def start_meditation(
 
     insight_reward += max(0, int(meditation_mode_insight_bonus(meditation_mode) * 10))
     breakthrough_reward += meditation_mode_breakthrough_bonus(meditation_mode) // 3
+    if meditation_mode == MeditationMode.INSIGHT:
+        insight_reward += int(event_bonus_values.get("meditation_insight", 0))
+    if meditation_mode == MeditationMode.BREAKTHROUGH:
+        breakthrough_reward += int(
+            breakthrough_reward * float(event_bonus_values.get("meditation_breakthrough_multiplier", 0.0))
+        )
 
     started_at = _now()
     until = started_at + timedelta(minutes=minutes)
@@ -1693,6 +2074,12 @@ async def end_meditation(user_id: str) -> MeditationClaimResult:
         refreshed_player,
         _meditation_age_progress(player, player.meditation_minutes, world_state, mode),
     )
+    event_notice = await _record_world_event_progress(
+        refreshed_player,
+        "meditation_breakthrough" if mode == MeditationMode.BREAKTHROUGH else (
+            "meditation_insight" if mode == MeditationMode.INSIGHT else ""
+        ),
+    ) if mode in {MeditationMode.BREAKTHROUGH, MeditationMode.INSIGHT} else None
 
     return MeditationClaimResult(
         reward=player.meditation_reward,
@@ -1704,6 +2091,7 @@ async def end_meditation(user_id: str) -> MeditationClaimResult:
         mode_name=mode.value,
         insight_gain=player.meditation_insight_reward,
         breakthrough_ready_gain=player.meditation_breakthrough_reward,
+        event_notice=event_notice,
     )
 
 
@@ -1716,6 +2104,9 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
     methods = await _load_methods(repo, player)
     primary_method = _primary_method(player, methods)
     world_state = await _get_today_world_state()
+    world_event = await _get_today_world_event()
+    event_bonus_values = _world_event_bonus_values(str(world_event["event_key"]))
+    event_failure_guard = int(event_bonus_values.get("breakthrough_guard", 0))
     target = next_realm(player.realm)
 
     if target is None:
@@ -1726,7 +2117,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
         if player.breakthrough_ready < 24:
             raise GameError("not_enough_preparation")
 
-        failure_guard = _destiny_failure_guard(player)
+        failure_guard = _destiny_failure_guard(player) + event_failure_guard
         chance = 65
         chance += player.fortune // 8
         chance += world_state.fortune_bonus
@@ -1735,6 +2126,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
         chance += min(8, player.insight // 4)
         chance += min(12, player.breakthrough_ready // 5)
         chance += failure_guard
+        chance += int(event_bonus_values.get("breakthrough_chance", 0))
         chance -= _lifespan_breakthrough_penalty(player)
         chance = max(18, min(chance, 98))
 
@@ -1766,6 +2158,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
                 soul_mark_gained=True,
                 lifespan_notice=lifespan_notice,
                 preparation_cost=preparation_cost,
+                event_notice=await _record_world_event_progress(player, "breakthrough", success=True),
             )
 
         penalty_rate = max(
@@ -1795,6 +2188,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
             soul_mark_gained=False,
             lifespan_notice=lifespan_notice,
             preparation_cost=preparation_cost,
+            event_notice=await _record_world_event_progress(player, "breakthrough", success=False),
         )
 
     required = realm_requirement(target)
@@ -1806,7 +2200,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
     if player.breakthrough_ready < preparation_needed:
         raise GameError("not_enough_preparation")
 
-    failure_guard = _destiny_failure_guard(player)
+    failure_guard = _destiny_failure_guard(player) + event_failure_guard
     chance = breakthrough_base_chance(player.realm)
     chance += _root_breakthrough_total(player)
     chance += min(12, player.fortune // 10)
@@ -1816,6 +2210,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
     chance += world_state.fortune_bonus
     chance += 0 if primary_method is None else int(primary_method.get("breakthrough_total", 0))
     chance += failure_guard
+    chance += int(event_bonus_values.get("breakthrough_chance", 0))
     chance -= _lifespan_breakthrough_penalty(player)
     if major:
         chance -= 6
@@ -1848,6 +2243,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
             lifespan_notice=lifespan_notice,
             unlocked_methods=unlocked_methods,
             preparation_cost=preparation_cost,
+            event_notice=await _record_world_event_progress(player, "breakthrough", success=True),
         )
 
     penalty_rate = get_settings().breakthrough_fail_penalty_rate * (1.2 if major else 1.0)
@@ -1876,6 +2272,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
         world_title=world_state.title,
         lifespan_notice=lifespan_notice,
         preparation_cost=preparation_cost,
+        event_notice=await _record_world_event_progress(player, "breakthrough", success=False),
     )
 
 
@@ -2011,12 +2408,15 @@ async def craft_elixir(user_id: str, recipe_name: str) -> AlchemyResult:
         raise GameError("not_enough_materials")
 
     world_state = await _get_today_world_state()
+    world_event = await _get_today_world_event()
+    event_bonus_values = _world_event_bonus_values(str(world_event["event_key"]))
     chance = int(recipe["base_chance"])
     chance += min(12, player.comprehension // 2)
     chance += min(8, player.insight // 6)
     chance += min(6, player.rebirth_count * 2)
     alchemy_bonus = _destiny_alchemy_bonus(player)
     chance += alchemy_bonus
+    chance += int(event_bonus_values.get("alchemy_chance", 0))
     if primary_method is not None:
         chance += min(8, int(float(primary_method.get("insight_total", 0.0)) * 100 // 4))
         chance += min(6, int(primary_method.get("mastery", 0)) // 40)
@@ -2051,10 +2451,11 @@ async def craft_elixir(user_id: str, recipe_name: str) -> AlchemyResult:
             double_threshold += 1
         if roll_value <= min(24, double_threshold):
             quantity = 2
-            insight_gain = 1
+            insight_gain = 1 + int(event_bonus_values.get("alchemy_insight", 0))
         await repo.add_inventory_item(user_id, item_id, quantity)
         if insight_gain:
             await repo.update_player_stats(user_id, insight_delta=insight_gain)
+        event_notice = await _record_world_event_progress(player, "alchemy", success=True, quantity=quantity)
         return AlchemyResult(
             item_name=str(item["name"]),
             roll_value=roll_value,
@@ -2064,10 +2465,12 @@ async def craft_elixir(user_id: str, recipe_name: str) -> AlchemyResult:
             world_title=world_state.title,
             message="丹炉一震，丹香四散，这一炉炼成了。",
             insight_gain=insight_gain,
+            event_notice=event_notice,
         )
 
     byproduct_quantity = 1 if roll_value <= chance + 18 else 2
     await repo.add_inventory_item(user_id, "pill-dregs", byproduct_quantity)
+    event_notice = await _record_world_event_progress(player, "alchemy", success=False)
     return AlchemyResult(
         item_name=str(item["name"]),
         roll_value=roll_value,
@@ -2078,6 +2481,7 @@ async def craft_elixir(user_id: str, recipe_name: str) -> AlchemyResult:
         message="火候失衡，药性散乱，这一炉化作了丹渣。",
         byproduct_name="丹渣",
         byproduct_quantity=byproduct_quantity,
+        event_notice=event_notice,
     )
 
 
@@ -2097,6 +2501,8 @@ async def duel(user_id: str, target: str) -> DuelResult:
         raise GameError("not_enough_stamina")
 
     world_state = await _get_today_world_state()
+    world_event = await _get_today_world_event()
+    event_bonus_values = _world_event_bonus_values(str(world_event["event_key"]))
     attacker_methods = await _load_methods(repo, attacker)
     defender_methods = await _load_methods(repo, defender)
     attacker_primary = _primary_method(attacker, attacker_methods)
@@ -2119,8 +2525,10 @@ async def duel(user_id: str, target: str) -> DuelResult:
     reward_spirit = random.randint(
         get_settings().duel_daily_reward_spirit_stones_min,
         get_settings().duel_daily_reward_spirit_stones_max,
-    ) + max(0, _realm_power(loser) // 8)
-    reward_cultivation = 40 + max(0, abs(attacker_total - defender_total) // 2)
+    ) + max(0, _realm_power(loser) // 8) + int(event_bonus_values.get("duel_spirit", 0))
+    reward_cultivation = 40 + max(0, abs(attacker_total - defender_total) // 2) + int(
+        event_bonus_values.get("duel_cultivation", 0)
+    )
     reward_insight = 1 if abs(attacker_total - defender_total) >= 18 else 0
     loser_cultivation_loss = -max(20, reward_cultivation // 2)
 
@@ -2162,6 +2570,7 @@ async def duel(user_id: str, target: str) -> DuelResult:
         reward_cultivation=reward_cultivation,
         reward_item_id=None,
     )
+    event_notice = await _record_world_event_progress(winner, "duel")
 
     return DuelResult(
         attacker_name=attacker.nickname,
@@ -2180,6 +2589,7 @@ async def duel(user_id: str, target: str) -> DuelResult:
         loser_cultivation_loss=loser_cultivation_loss,
         attacker_stamina_delta=-stamina_cost,
         defender_stamina_delta=-stamina_cost,
+        event_notice=event_notice,
     )
 
 
@@ -2206,6 +2616,8 @@ async def contemplate_method(user_id: str, method_name: str | None = None) -> Me
         raise GameError("method_not_found")
 
     world_state = await _get_today_world_state()
+    world_event = await _get_today_world_event()
+    event_bonus_values = _world_event_bonus_values(str(world_event["event_key"]))
     insight_factor = _insight_multiplier(player, method)
     mastery_gain = (
         random.randint(10, 18)
@@ -2218,6 +2630,7 @@ async def contemplate_method(user_id: str, method_name: str | None = None) -> Me
         mastery_gain += 2 + player.destiny_level
     elif player.destiny_type == DestinyType.TURNFATE:
         mastery_gain += 1 + player.destiny_level // 2
+    mastery_gain += int(event_bonus_values.get("contemplate_mastery", 0))
     cultivation_gain = 60 + mastery_gain * 4
     insight_gain = max(2, int(1 + mastery_gain / 8))
     breakthrough_gain = 0
@@ -2234,6 +2647,7 @@ async def contemplate_method(user_id: str, method_name: str | None = None) -> Me
     )
     refreshed = await repo.get_player_method_by_name(user_id, str(method["name"]))
     assert refreshed is not None
+    event_notice = await _record_world_event_progress(player, "insight")
     return MethodInsightResult(
         method_name=str(method["name"]),
         mastery_gain=mastery_gain,
@@ -2242,6 +2656,7 @@ async def contemplate_method(user_id: str, method_name: str | None = None) -> Me
         world_title=world_state.title,
         insight_gain=insight_gain,
         breakthrough_ready_gain=breakthrough_gain,
+        event_notice=event_notice,
     )
 
 

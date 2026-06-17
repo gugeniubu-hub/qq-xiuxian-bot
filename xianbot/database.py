@@ -175,6 +175,36 @@ CREATE TABLE IF NOT EXISTS world_states (
   fortune_bonus INTEGER NOT NULL DEFAULT 0,
   lifespan_bonus INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS world_events (
+  event_date TEXT PRIMARY KEY,
+  event_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  objective TEXT NOT NULL,
+  target_progress INTEGER NOT NULL,
+  current_progress INTEGER NOT NULL DEFAULT 0,
+  reward_spirit_stones INTEGER NOT NULL DEFAULT 0,
+  reward_cultivation INTEGER NOT NULL DEFAULT 0,
+  reward_insight INTEGER NOT NULL DEFAULT 0,
+  reward_item_id TEXT,
+  reward_item_quantity INTEGER NOT NULL DEFAULT 0,
+  bonus_text TEXT NOT NULL DEFAULT '',
+  participation_hint TEXT NOT NULL DEFAULT '',
+  completed_at TEXT,
+  FOREIGN KEY (reward_item_id) REFERENCES items(id)
+);
+
+CREATE TABLE IF NOT EXISTS world_event_contributions (
+  event_date TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  contribution INTEGER NOT NULL DEFAULT 0,
+  claimed INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (event_date, user_id),
+  FOREIGN KEY (event_date) REFERENCES world_events(event_date),
+  FOREIGN KEY (user_id) REFERENCES players(user_id)
+);
 """
 
 DEFAULT_SECTS = (
@@ -361,6 +391,10 @@ def resolve_sqlite_path(database_url: str) -> Path:
 def initialize_database(database_url: str) -> Path:
     db_path = resolve_sqlite_path(database_url)
     with sqlite3.connect(db_path) as connection:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=NORMAL")
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA busy_timeout = 30000")
         connection.executescript(SCHEMA_SQL)
         _ensure_schema_compatibility(connection)
         connection.executemany(

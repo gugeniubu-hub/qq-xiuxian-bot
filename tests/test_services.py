@@ -9,6 +9,7 @@ from xianbot.services import (
     adventure,
     breakthrough,
     buy_market_listing,
+    claim_today_world_event_reward,
     contemplate_method,
     craft_elixir,
     create_market_listing,
@@ -19,6 +20,7 @@ from xianbot.services import (
     get_destiny_status,
     get_player_methods,
     get_player_status,
+    get_today_world_event,
     get_today_world_state,
     join_sect,
     rebirth,
@@ -51,6 +53,187 @@ def test_create_player_and_sign_in(tmp_path, monkeypatch) -> None:
         assert updated.destiny_type is None
         destiny = await get_destiny_status("10001")
         assert destiny.destiny_name == "命格未显"
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_world_event_generation_progress_and_claim(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian12.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("70001", "eventer")
+        repo = GameRepository(get_settings().database_url)
+
+        generated = await get_today_world_event("70001")
+        assert generated.title
+        assert generated.target_progress > 0
+        assert generated.player_contribution == 0
+        assert generated.claimed is False
+
+        await repo.save_world_event(
+            event_date=generated.event_date,
+            event_key="secret-realm",
+            title="玄脉秘境开启",
+            description="群友协力稳固秘境入口。",
+            objective="通过历练清剿外围异兽。",
+            target_progress=6,
+            current_progress=0,
+            reward_spirit_stones=180,
+            reward_cultivation=260,
+            reward_insight=1,
+            reward_item_id="spirit-herb",
+            reward_item_quantity=2,
+            bonus_text="历练额外获得收益。",
+            participation_hint="多用“历练”推进。",
+            completed_at=None,
+        )
+
+        result = await adventure("70001")
+        assert result.event_notice is not None
+        assert "世界事件" in result.event_notice
+
+        progressed = await get_today_world_event("70001")
+        assert progressed.current_progress > 0
+        assert progressed.player_contribution > 0
+        assert progressed.claimed is False
+
+        await repo.save_world_event(
+            event_date=generated.event_date,
+            event_key="secret-realm",
+            title="玄脉秘境开启",
+            description="群友协力稳固秘境入口。",
+            objective="通过历练清剿外围异兽。",
+            target_progress=progressed.target_progress,
+            current_progress=progressed.target_progress,
+            reward_spirit_stones=180,
+            reward_cultivation=260,
+            reward_insight=1,
+            reward_item_id="spirit-herb",
+            reward_item_quantity=2,
+            bonus_text="历练额外获得收益。",
+            participation_hint="多用“历练”推进。",
+            completed_at="2026-06-18T12:00:00",
+        )
+
+        before = await get_player_status("70001")
+        assert before is not None
+        reward = await claim_today_world_event_reward("70001")
+        assert reward.title == "玄脉秘境开启"
+        assert reward.contribution == progressed.player_contribution
+        assert reward.reward_spirit_stones == 180
+        assert reward.reward_cultivation == 260
+        assert reward.reward_insight == 1
+        assert reward.reward_item_name == "灵草"
+        assert reward.reward_item_quantity == 2
+
+        after = await get_player_status("70001")
+        assert after is not None
+        assert after.spirit_stones >= before.spirit_stones + 180
+        assert after.cultivation >= before.cultivation + 260
+        assert after.insight >= before.insight + 1
+
+        claimed = await get_today_world_event("70001")
+        assert claimed.claimed is True
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_world_event_claim_rejects_repeat_claim(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian13.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("70002", "claimer")
+        repo = GameRepository(get_settings().database_url)
+        event_date = (await get_today_world_event("70002")).event_date
+
+        await repo.save_world_event(
+            event_date=event_date,
+            event_key="ruin-echo",
+            title="残碑道藏出世",
+            description="古碑虚影散落四方。",
+            objective="通过奇遇搜集残碑气机。",
+            target_progress=5,
+            current_progress=5,
+            reward_spirit_stones=150,
+            reward_cultivation=220,
+            reward_insight=2,
+            reward_item_id="method-fragment",
+            reward_item_quantity=1,
+            bonus_text="奇遇更易增益。",
+            participation_hint="多用“奇遇”推进。",
+            completed_at="2026-06-18T08:00:00",
+        )
+        await repo.contribute_world_event(
+            event_date=event_date,
+            user_id="70002",
+            contribution=3,
+        )
+
+        first = await claim_today_world_event_reward("70002")
+        assert first.reward_item_name == "吐纳残篇"
+
+        try:
+            await claim_today_world_event_reward("70002")
+        except ValueError as exc:
+            assert str(exc) == "already_claimed"
+        else:
+            raise AssertionError("second claim should fail")
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_world_event_concurrency_is_atomic(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian14.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        ids = [f"7100{i}" for i in range(1, 7)]
+        await asyncio.gather(*(create_player_if_missing(user_id, user_id) for user_id in ids))
+
+        repo = GameRepository(get_settings().database_url)
+        event_date = (await get_today_world_event(ids[0])).event_date
+        await repo.save_world_event(
+            event_date=event_date,
+            event_key="secret-realm",
+            title="玄脉秘境开启",
+            description="群友协力稳固秘境入口。",
+            objective="通过历练清剿外围异兽。",
+            target_progress=12,
+            current_progress=0,
+            reward_spirit_stones=180,
+            reward_cultivation=260,
+            reward_insight=1,
+            reward_item_id="spirit-herb",
+            reward_item_quantity=2,
+            bonus_text="历练额外获得收益。",
+            participation_hint="多用“历练”推进。",
+            completed_at=None,
+        )
+
+        results = await asyncio.gather(*(adventure(user_id) for user_id in ids))
+        assert all(result.event_notice for result in results)
+
+        event = await get_today_world_event(ids[0])
+        contributions = await asyncio.gather(
+            *(repo.get_world_event_contribution(event_date, user_id) for user_id in ids)
+        )
+        total_contribution = sum(int(row["contribution"]) for row in contributions if row is not None)
+
+        assert event.current_progress == event.target_progress
+        assert event.completed is True
+        assert total_contribution >= event.target_progress
+        assert all(row is not None and int(row["contribution"]) > 0 for row in contributions)
 
     asyncio.run(scenario())
     get_settings.cache_clear()

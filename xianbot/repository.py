@@ -28,8 +28,6 @@ class GameRepository:
     async def _connect(self) -> AsyncIterator[aiosqlite.Connection]:
         connection = await aiosqlite.connect(self.db_path, timeout=30)
         connection.row_factory = aiosqlite.Row
-        await connection.execute("PRAGMA journal_mode=WAL")
-        await connection.execute("PRAGMA synchronous=NORMAL")
         await connection.execute("PRAGMA foreign_keys=ON")
         await connection.execute("PRAGMA busy_timeout = 30000")
         try:
@@ -1070,7 +1068,249 @@ class GameRepository:
                 (seller_user_id, item_id, quantity, unit_price),
             )
             await db.commit()
-        return int(cursor.lastrowid)
+            return int(cursor.lastrowid)
+
+    async def get_world_event(self, event_date: str) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT
+                  event_date, event_key, title, description, objective,
+                  target_progress, current_progress,
+                  reward_spirit_stones, reward_cultivation, reward_insight,
+                  reward_item_id, reward_item_quantity,
+                  bonus_text, participation_hint, completed_at
+                FROM world_events
+                WHERE event_date = ?
+                """,
+                (event_date,),
+            )
+        return None if row is None else dict(row)
+
+    async def save_world_event(
+        self,
+        *,
+        event_date: str,
+        event_key: str,
+        title: str,
+        description: str,
+        objective: str,
+        target_progress: int,
+        current_progress: int,
+        reward_spirit_stones: int,
+        reward_cultivation: int,
+        reward_insight: int,
+        reward_item_id: str | None,
+        reward_item_quantity: int,
+        bonus_text: str,
+        participation_hint: str,
+        completed_at: str | None = None,
+    ) -> None:
+        async with self._connect() as db:
+            await db.execute(
+                """
+                INSERT OR REPLACE INTO world_events (
+                  event_date, event_key, title, description, objective,
+                  target_progress, current_progress,
+                  reward_spirit_stones, reward_cultivation, reward_insight,
+                  reward_item_id, reward_item_quantity,
+                  bonus_text, participation_hint, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_date,
+                    event_key,
+                    title,
+                    description,
+                    objective,
+                    target_progress,
+                    current_progress,
+                    reward_spirit_stones,
+                    reward_cultivation,
+                    reward_insight,
+                    reward_item_id,
+                    reward_item_quantity,
+                    bonus_text,
+                    participation_hint,
+                    completed_at,
+                ),
+            )
+            await db.commit()
+
+    async def get_world_event_contribution(self, event_date: str, user_id: str) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT event_date, user_id, contribution, claimed, updated_at
+                FROM world_event_contributions
+                WHERE event_date = ? AND user_id = ?
+                """,
+                (event_date, user_id),
+            )
+        return None if row is None else dict(row)
+
+    async def contribute_world_event(
+        self,
+        *,
+        event_date: str,
+        user_id: str,
+        contribution: int,
+    ) -> dict[str, Any] | None:
+        if contribution <= 0:
+            return None
+        async with self._connect() as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                event_row = await self._fetchone(
+                    db,
+                    """
+                    SELECT
+                      target_progress, current_progress, completed_at
+                    FROM world_events
+                    WHERE event_date = ?
+                    """,
+                    (event_date,),
+                )
+                if event_row is None:
+                    await db.rollback()
+                    return None
+
+                current_progress = int(event_row["current_progress"])
+                target_progress = int(event_row["target_progress"])
+                next_progress = min(target_progress, current_progress + contribution)
+                completed_at = event_row["completed_at"]
+                if completed_at is None and next_progress >= target_progress:
+                    await db.execute(
+                        """
+                        UPDATE world_events
+                        SET current_progress = ?, completed_at = CURRENT_TIMESTAMP
+                        WHERE event_date = ?
+                        """,
+                        (next_progress, event_date),
+                    )
+                else:
+                    await db.execute(
+                        """
+                        UPDATE world_events
+                        SET current_progress = ?
+                        WHERE event_date = ?
+                        """,
+                        (next_progress, event_date),
+                    )
+
+                await db.execute(
+                    """
+                    INSERT INTO world_event_contributions (
+                      event_date, user_id, contribution, claimed, updated_at
+                    ) VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP)
+                    ON CONFLICT(event_date, user_id)
+                    DO UPDATE SET
+                      contribution = contribution + excluded.contribution,
+                      updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (event_date, user_id, contribution),
+                )
+                await db.commit()
+                return {
+                    "event_date": event_date,
+                    "user_id": user_id,
+                    "contribution": contribution,
+                    "current_progress": next_progress,
+                    "target_progress": target_progress,
+                    "completed": next_progress >= target_progress,
+                }
+            except Exception:
+                await db.rollback()
+                raise
+
+    async def claim_world_event_reward(self, *, event_date: str, user_id: str) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                event_row = await self._fetchone(
+                    db,
+                    """
+                    SELECT
+                      title, completed_at,
+                      reward_spirit_stones, reward_cultivation, reward_insight,
+                      reward_item_id, reward_item_quantity
+                    FROM world_events
+                    WHERE event_date = ?
+                    """,
+                    (event_date,),
+                )
+                if event_row is None or event_row["completed_at"] is None:
+                    await db.rollback()
+                    return None
+
+                contribution_row = await self._fetchone(
+                    db,
+                    """
+                    SELECT contribution, claimed
+                    FROM world_event_contributions
+                    WHERE event_date = ? AND user_id = ?
+                    """,
+                    (event_date, user_id),
+                )
+                if contribution_row is None:
+                    await db.rollback()
+                    return {"reason": "not_participated"}
+                if int(contribution_row["claimed"]) == 1:
+                    await db.rollback()
+                    return {"reason": "already_claimed"}
+
+                reward_spirit_stones = int(event_row["reward_spirit_stones"])
+                reward_cultivation = int(event_row["reward_cultivation"])
+                reward_insight = int(event_row["reward_insight"])
+                reward_item_id = event_row["reward_item_id"]
+                reward_item_quantity = int(event_row["reward_item_quantity"])
+
+                await db.execute(
+                    """
+                    UPDATE players
+                    SET
+                      spirit_stones = spirit_stones + ?,
+                      cultivation = cultivation + ?,
+                      insight = insight + ?,
+                      updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ?
+                    """,
+                    (reward_spirit_stones, reward_cultivation, reward_insight, user_id),
+                )
+                if reward_item_id is not None and reward_item_quantity > 0:
+                    await db.execute(
+                        """
+                        INSERT INTO inventories (user_id, item_id, quantity)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(user_id, item_id)
+                        DO UPDATE SET quantity = quantity + excluded.quantity
+                        """,
+                        (user_id, reward_item_id, reward_item_quantity),
+                    )
+
+                await db.execute(
+                    """
+                    UPDATE world_event_contributions
+                    SET claimed = 1, updated_at = CURRENT_TIMESTAMP
+                    WHERE event_date = ? AND user_id = ?
+                    """,
+                    (event_date, user_id),
+                )
+                await db.commit()
+                return {
+                    "title": str(event_row["title"]),
+                    "reward_spirit_stones": reward_spirit_stones,
+                    "reward_cultivation": reward_cultivation,
+                    "reward_insight": reward_insight,
+                    "reward_item_id": reward_item_id,
+                    "reward_item_quantity": reward_item_quantity,
+                    "contribution": int(contribution_row["contribution"]),
+                }
+            except Exception:
+                await db.rollback()
+                raise
 
     async def create_market_listing_from_inventory(
         self,
