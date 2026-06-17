@@ -334,3 +334,103 @@ def affinity_synergy(root_affinity: Affinity, method_affinity: Affinity) -> floa
     if (method_index + 1) % len(AFFINITY_CYCLE) == root_index:
         return 0.02
     return 0.0
+
+
+def affinity_specialization_bonus(root_affinity: Affinity, method_affinity: Affinity) -> dict[str, float | int]:
+    if root_affinity == method_affinity:
+        return {
+            "practice": 0.04,
+            "breakthrough": 3,
+            "insight": 0.02,
+            "adventure": 2,
+        }
+    if root_affinity == Affinity.THUNDER:
+        if method_affinity in {Affinity.THUNDER, Affinity.FIRE, Affinity.WIND}:
+            return {
+                "practice": 0.02,
+                "breakthrough": 4,
+                "insight": 0.00,
+                "adventure": 4,
+            }
+    if root_affinity == Affinity.VOID:
+        if method_affinity in {Affinity.VOID, Affinity.WATER, Affinity.WIND}:
+            return {
+                "practice": 0.01,
+                "breakthrough": 1,
+                "insight": 0.05,
+                "adventure": 1,
+            }
+    if root_affinity == Affinity.WIND:
+        if method_affinity in {Affinity.WIND, Affinity.WOOD, Affinity.WATER}:
+            return {
+                "practice": 0.02,
+                "breakthrough": 1,
+                "insight": 0.01,
+                "adventure": 4,
+            }
+    if root_affinity == Affinity.FIRE:
+        if method_affinity in {Affinity.FIRE, Affinity.THUNDER, Affinity.EARTH}:
+            return {
+                "practice": 0.02,
+                "breakthrough": 3,
+                "insight": 0.00,
+                "adventure": 3,
+            }
+    if root_affinity == Affinity.WATER:
+        if method_affinity in {Affinity.WATER, Affinity.WOOD, Affinity.VOID}:
+            return {
+                "practice": 0.01,
+                "breakthrough": 1,
+                "insight": 0.03,
+                "adventure": 1,
+            }
+    if root_affinity == Affinity.WOOD:
+        if method_affinity in {Affinity.WOOD, Affinity.WATER, Affinity.WIND}:
+            return {
+                "practice": 0.03,
+                "breakthrough": 1,
+                "insight": 0.02,
+                "adventure": 1,
+            }
+    if root_affinity == Affinity.EARTH:
+        if method_affinity in {Affinity.EARTH, Affinity.METAL, Affinity.FIRE}:
+            return {
+                "practice": 0.02,
+                "breakthrough": 3,
+                "insight": 0.01,
+                "adventure": 0,
+            }
+    if root_affinity == Affinity.METAL:
+        if method_affinity in {Affinity.METAL, Affinity.EARTH, Affinity.WATER}:
+            return {
+                "practice": 0.02,
+                "breakthrough": 2,
+                "insight": 0.01,
+                "adventure": 2,
+            }
+    return {
+        "practice": 0.0,
+        "breakthrough": 0,
+        "insight": 0.0,
+        "adventure": 0,
+    }
+
+
+def affinity_method_bias(root_affinity: Affinity, method_affinity: Affinity) -> dict[str, float | int]:
+    if root_affinity == Affinity.THUNDER and method_affinity in {Affinity.THUNDER, Affinity.FIRE}:
+        return {"practice": 0.03, "breakthrough": 4, "insight": 0.0, "adventure": 3}
+    if root_affinity == Affinity.VOID and method_affinity in {Affinity.VOID, Affinity.WATER}:
+        return {"practice": 0.02, "breakthrough": 1, "insight": 0.04, "adventure": 1}
+    if root_affinity == Affinity.WIND and method_affinity in {Affinity.WIND, Affinity.WOOD}:
+        return {"practice": 0.03, "breakthrough": 2, "insight": 0.02, "adventure": 3}
+    if root_affinity == Affinity.FIRE and method_affinity in {Affinity.FIRE, Affinity.EARTH}:
+        return {"practice": 0.02, "breakthrough": 3, "insight": 0.0, "adventure": 2}
+    if root_affinity == Affinity.WATER and method_affinity in {Affinity.WATER, Affinity.WOOD}:
+        return {"practice": 0.03, "breakthrough": 1, "insight": 0.03, "adventure": 1}
+    if root_affinity == Affinity.METAL and method_affinity in {Affinity.METAL, Affinity.EARTH}:
+        return {"practice": 0.02, "breakthrough": 2, "insight": 0.01, "adventure": 2}
+    if root_affinity == Affinity.EARTH and method_affinity in {Affinity.EARTH, Affinity.FIRE}:
+        return {"practice": 0.02, "breakthrough": 2, "insight": 0.01, "adventure": 0}
+    if root_affinity == Affinity.WOOD and method_affinity in {Affinity.WOOD, Affinity.WATER}:
+        return {"practice": 0.03, "breakthrough": 1, "insight": 0.02, "adventure": 1}
+    return {"practice": 0.0, "breakthrough": 0, "insight": 0.0, "adventure": 0}

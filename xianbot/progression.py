@@ -6,17 +6,29 @@ from xianbot.domain import Player, RebirthUnlock, Realm, RootType
 
 
 REBIRTH_REALM_REQUIREMENT = Realm.SPIRIT_4
+REBIRTH_REALM_CAPS: tuple[Realm, ...] = (
+    Realm.FOUNDATION_4,
+    Realm.CORE_4,
+    Realm.NASCENT_4,
+    Realm.SPIRIT_4,
+)
 
 
 @dataclass(slots=True)
 class RebirthOutcome:
     next_root_floor: RootType
+    next_realm_cap: Realm
     legacy_points_gained: int
     unlocked_features: list[RebirthUnlock]
 
 
 def can_rebirth(player: Player) -> bool:
-    return player.realm == REBIRTH_REALM_REQUIREMENT and player.soul_marks >= 1
+    return player.realm == realm_cap_for_rebirth_count(player.rebirth_count) and player.soul_marks >= 1
+
+
+def realm_cap_for_rebirth_count(rebirth_count: int) -> Realm:
+    index = max(0, min(rebirth_count, len(REBIRTH_REALM_CAPS) - 1))
+    return REBIRTH_REALM_CAPS[index]
 
 
 def unlocks_for_rebirth_count(rebirth_count: int) -> list[RebirthUnlock]:
@@ -54,6 +66,7 @@ def calculate_rebirth_outcome(player: Player) -> RebirthOutcome:
         next_root_floor = RootType.MORTAL
     return RebirthOutcome(
         next_root_floor=next_root_floor,
+        next_realm_cap=realm_cap_for_rebirth_count(next_count),
         legacy_points_gained=1 + max(0, next_count - 1),
         unlocked_features=unlocks_for_rebirth_count(next_count),
     )

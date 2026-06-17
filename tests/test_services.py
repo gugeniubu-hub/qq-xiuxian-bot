@@ -3,9 +3,10 @@ from collections import Counter
 
 from xianbot.config import get_settings
 from xianbot.database import initialize_database
-from xianbot.domain import DestinyType, MeditationMode, Realm
+from xianbot.domain import Affinity, DestinyType, MeditationMode, Realm, RootTemperament, RootTrait, RootType
 from xianbot.repository import GameRepository
 from xianbot.services import (
+    _effective_max_realm,
     adventure,
     breakthrough,
     buy_market_listing,
@@ -53,6 +54,172 @@ def test_create_player_and_sign_in(tmp_path, monkeypatch) -> None:
         assert updated.destiny_type is None
         destiny = await get_destiny_status("10001")
         assert destiny.destiny_name == "命格未显"
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_initial_realm_cap_blocks_higher_breakthrough(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian15.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("80001", "capper")
+        repo = GameRepository(get_settings().database_url)
+        await repo.update_player_stats(
+            "80001",
+            realm=Realm.FOUNDATION_4,
+            cultivation_delta=2600,
+            breakthrough_ready_delta=80,
+            insight_delta=30,
+            fortune_delta=30,
+        )
+        player = await get_player_status("80001")
+        assert player is not None
+        assert _effective_max_realm(player) == Realm.FOUNDATION_4
+
+        try:
+            await breakthrough("80001")
+        except ValueError as exc:
+            assert str(exc) == "realm_maxed"
+        else:
+            raise AssertionError("initial realm cap should block further breakthrough")
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_rebirth_raises_realm_cap_and_root_rarity(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian16.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("80002", "reborncap")
+        repo = GameRepository(get_settings().database_url)
+        await repo.update_player_stats(
+            "80002",
+            realm=Realm.FOUNDATION_4,
+            cultivation_delta=3200,
+            insight_delta=120,
+            breakthrough_ready_delta=80,
+            soul_marks_delta=1,
+            legacy_points_delta=3,
+        )
+
+        result = await rebirth("80002")
+        assert result.new_realm_cap == Realm.CORE_4.value
+
+        player = await get_player_status("80002")
+        assert player is not None
+        assert player.rebirth_count == 1
+        assert _effective_max_realm(player) == Realm.CORE_4
+        assert player.root_purity >= 33
+        assert player.root_affinity.value
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_root_affinity_bias_strengthens_matching_methods(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian17.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("80003", "fire-matcher")
+        await create_player_if_missing("80004", "water-contrast")
+        repo = GameRepository(get_settings().database_url)
+        for user_id, affinity in (("80003", Affinity.FIRE), ("80004", Affinity.WATER)):
+            await join_sect(user_id, "赤霄门")
+            await repo.update_player_stats(
+                user_id,
+                root_type=RootType.HEAVEN,
+                root_affinity=affinity,
+                root_purity=92,
+                root_temperament=RootTemperament.FIERCE,
+                root_trait=RootTrait.EMBER,
+                rebirth_count_delta=2,
+            )
+
+        fire_methods = await get_player_methods("80003")
+        water_methods = await get_player_methods("80004")
+        fire_match = next((item for item in fire_methods if str(item["affinity"]) == Affinity.FIRE.value), None)
+        water_match = next((item for item in water_methods if str(item["affinity"]) == Affinity.FIRE.value), None)
+
+        assert fire_match is not None
+        assert water_match is not None
+        assert str(fire_match["id"]) == str(water_match["id"])
+        assert float(fire_match["practice_total"]) > float(water_match["practice_total"])
+        assert int(fire_match["breakthrough_total"]) > int(water_match["breakthrough_total"])
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_meditation_and_alchemy_gain_root_specific_bias(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian18.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("80005", "void-pill")
+        await create_player_if_missing("80006", "earth-core")
+        repo = GameRepository(get_settings().database_url)
+
+        await repo.update_player_stats(
+            "80005",
+            root_type=RootType.HEAVEN,
+            root_affinity=Affinity.VOID,
+            root_purity=94,
+            root_temperament=RootTemperament.ENLIGHTENED,
+            root_trait=RootTrait.INSIGHTFUL,
+            rebirth_count_delta=2,
+        )
+        await repo.update_player_stats(
+            "80006",
+            root_type=RootType.HEAVEN,
+            root_affinity=Affinity.EARTH,
+            root_purity=93,
+            root_temperament=RootTemperament.TRANQUIL,
+            root_trait=RootTrait.GATHERING,
+            rebirth_count_delta=1,
+        )
+
+        await join_sect("80005", "青岚宗")
+        await join_sect("80006", "赤霄门")
+        await repo.grant_player_method("80005", "mist-heart")
+        await repo.grant_player_method("80006", "flame-body")
+        await set_primary_method("80005", "青岚养心篇")
+        await set_primary_method("80006", "离火锻骨篇")
+
+        await repo.add_inventory_item("80005", "spirit-herb", 2)
+        await repo.add_inventory_item("80005", "clear-dew", 1)
+        await repo.add_inventory_item("80005", "moon-dust", 1)
+
+        import xianbot.services as services
+
+        original_randint = services.random.randint
+        services.random.randint = lambda a, b: 8
+        try:
+            insight_alchemy = await craft_elixir("80005", "悟道丹")
+        finally:
+            services.random.randint = original_randint
+
+        assert insight_alchemy.success is True
+        assert insight_alchemy.quantity == 2
+        assert insight_alchemy.insight_gain >= 2
+
+        insight_meditation = await start_meditation("80005", 30, MeditationMode.INSIGHT)
+        breakthrough_meditation = await start_meditation("80006", 30, MeditationMode.BREAKTHROUGH)
+
+        assert insight_meditation.insight_reward > breakthrough_meditation.insight_reward
+        assert breakthrough_meditation.breakthrough_reward > insight_meditation.breakthrough_reward
 
     asyncio.run(scenario())
     get_settings.cache_clear()
@@ -389,7 +556,7 @@ def test_rebirth_unlocks_destiny_and_persists(tmp_path, monkeypatch) -> None:
         await repo.update_player_stats(
             "50001",
             rebirth_count_delta=1,
-            realm=Realm.SPIRIT_4,
+            realm=Realm.CORE_4,
             cultivation_delta=12000,
             insight_delta=120,
             breakthrough_ready_delta=80,
@@ -438,7 +605,7 @@ def test_destiny_improves_alchemy_and_duel(tmp_path, monkeypatch) -> None:
         import xianbot.services as services
 
         original_randint = services.random.randint
-        services.random.randint = lambda a, b: 82
+        services.random.randint = lambda a, b: 80
         try:
             baseline_alchemy = await craft_elixir("60001", "洗髓丹")
         finally:
@@ -453,7 +620,7 @@ def test_destiny_improves_alchemy_and_duel(tmp_path, monkeypatch) -> None:
             destiny_level_delta=4,
         )
         try:
-            services.random.randint = lambda a, b: 82
+            services.random.randint = lambda a, b: 80
             empowered_alchemy = await craft_elixir("60001", "洗髓丹")
         finally:
             services.random.randint = original_randint

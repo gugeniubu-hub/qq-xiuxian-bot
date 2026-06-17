@@ -13,6 +13,8 @@ from xianbot.game_text import (
 )
 from xianbot.services import (
     GameError,
+    _effective_max_realm,
+    _root_growth_brief,
     adventure,
     breakthrough,
     buy_market_listing,
@@ -207,7 +209,9 @@ async def handle_status(event: MessageEvent) -> None:
                 f"道号: {player.nickname}",
                 f"灵根: {player.root_type.value}·{player.root_affinity.value}系 | 纯度 {player.root_purity}",
                 f"根性: {player.root_temperament.value} | 特质: {player.root_trait.value}",
+                f"根骨走势: {_root_growth_brief(player)}",
                 f"境界: {player.realm.value}",
+                f"此生上限: {_effective_max_realm(player).value}",
                 f"修为: {player.cultivation}",
                 f"悟性: {player.comprehension} | 道悟: {player.insight} | 冲关底蕴: {player.breakthrough_ready}",
                 f"命格: {player.destiny_type.value + '·' + str(player.destiny_level) + '重' if player.destiny_type and player.destiny_level > 0 else '二转后显化'}",
@@ -284,7 +288,9 @@ async def handle_rebirth_action(event: MessageEvent) -> None:
         if reason == "player_not_found":
             await rebirth_cmd.finish("你还未入道，发送“入道”开始。")
         if reason == "rebirth_locked":
-            await rebirth_cmd.finish("转世条件未满足: 需要化神圆满，并持有至少 1 枚轮回印记。")
+            player = await get_player_status(event.get_user_id())
+            cap_text = "当前世上限" if player is None else _effective_max_realm(player).value
+            await rebirth_cmd.finish(f"转世条件未满足: 需要达到 {cap_text}，并持有至少 1 枚轮回印记。")
         raise
 
     unlocks = "、".join(result.unlocked_features) if result.unlocked_features else "暂无"
@@ -295,7 +301,7 @@ async def handle_rebirth_action(event: MessageEvent) -> None:
     )
     await rebirth_cmd.finish(
         f"道友已转世重修，前尘点 +{result.legacy_points_gained}。"
-        f"新灵根保底为 {result.new_root_floor}，本次根骨：{result.root_brief}。"
+        f"新灵根保底为 {result.new_root_floor}，此世上限提升至 {result.new_realm_cap}，本次根骨：{result.root_brief}。"
         f"{destiny_line}"
         f"解锁内容: {unlocks}。"
     )

@@ -22,7 +22,9 @@ from xianbot.domain import (
 from xianbot.progression import calculate_rebirth_outcome, can_rebirth
 from xianbot.repository import GameRepository
 from xianbot.rules import (
+    affinity_method_bias,
     affinity_synergy,
+    affinity_specialization_bonus,
     breakthrough_base_chance,
     meditation_mode_breakthrough_bonus,
     meditation_mode_insight_bonus,
@@ -75,6 +77,12 @@ ROOT_AFFINITY_ROLLS: tuple[tuple[int, Affinity], ...] = (
     (98, Affinity.THUNDER),
     (100, Affinity.VOID),
 )
+
+AFFINITY_RARE_OFFSETS: dict[Affinity, int] = {
+    Affinity.WIND: 2,
+    Affinity.THUNDER: 4,
+    Affinity.VOID: 6,
+}
 
 ROOT_TEMPERAMENT_ROLLS: tuple[tuple[int, RootTemperament], ...] = (
     (28, RootTemperament.BALANCED),
@@ -383,6 +391,7 @@ class RebirthResult:
     legacy_points_gained: int
     unlocked_features: list[str]
     new_root_floor: str
+    new_realm_cap: str
     root_brief: str
     destiny_name: str
     destiny_level: int
@@ -615,6 +624,33 @@ def _root_rank(root_type: RootType) -> int:
     return ROOT_TYPE_ORDER.index(root_type)
 
 
+def _effective_max_realm(player: Player) -> Realm:
+    if player.rebirth_count <= 0:
+        return Realm.FOUNDATION_4
+    if player.rebirth_count == 1:
+        return Realm.CORE_4
+    if player.rebirth_count == 2:
+        return Realm.NASCENT_4
+    return Realm.SPIRIT_4
+
+
+def _realm_cap_brief(player: Player) -> str:
+    return _effective_max_realm(player).value
+
+
+def _root_rarity_brief(player: Player) -> str:
+    rare_bias = AFFINITY_RARE_OFFSETS.get(player.root_affinity, 0)
+    if player.root_affinity == Affinity.VOID:
+        return "太虚异灵根"
+    if player.root_affinity == Affinity.THUNDER:
+        return "天雷异灵根"
+    if player.root_affinity == Affinity.WIND:
+        return "罡风异灵根"
+    if rare_bias > 0:
+        return "偏异灵根"
+    return "五行正灵根"
+
+
 def _weighted_choice(table: tuple[tuple[int, Any], ...], roll: int | None = None) -> Any:
     value = random.randint(1, 100) if roll is None else roll
     for threshold, result in table:
@@ -643,10 +679,12 @@ def roll_root_type(root_floor: RootType | None = None) -> RootType:
 
 def _roll_root_affinity(rebirth_count: int) -> Affinity:
     roll = random.randint(1, 100)
-    if rebirth_count >= 2 and roll >= 94:
+    if rebirth_count >= 3 and roll >= 93:
         return random.choice([Affinity.THUNDER, Affinity.VOID])
-    if rebirth_count >= 1 and roll >= 90:
+    if rebirth_count >= 2 and roll >= 88:
         return random.choice([Affinity.WIND, Affinity.THUNDER, Affinity.VOID])
+    if rebirth_count >= 1 and roll >= 84:
+        return random.choice([Affinity.WIND, Affinity.THUNDER])
     return _weighted_choice(ROOT_AFFINITY_ROLLS, roll=roll)
 
 
@@ -662,6 +700,9 @@ def _generate_root_profile(
 ) -> dict[str, object]:
     root_type = roll_root_type(root_floor)
     purity_min, purity_max = root_purity_range(root_type)
+    if rebirth_count > 0:
+        purity_min = min(99, purity_min + min(8, rebirth_count * 2))
+        purity_max = min(99, purity_max + min(10, rebirth_count * 3))
     root_purity = min(99, random.randint(purity_min, purity_max) + rebirth_count)
     root_affinity = _roll_root_affinity(rebirth_count)
     root_temperament = _weighted_choice(ROOT_TEMPERAMENT_ROLLS)
@@ -760,6 +801,165 @@ def _root_adventure_total(player: Player) -> int:
     return bonus
 
 
+def _alchemy_affinity_bias(
+    player: Player,
+    recipe: dict[str, Any],
+    method: dict[str, object] | None,
+) -> dict[str, int]:
+    item_id = str(recipe["item_id"])
+    chance = 0
+    double = 0
+    insight = 0
+
+    if item_id in {"qigather", "restore-powder"}:
+        if player.root_affinity == Affinity.WOOD:
+            chance += 4
+            double += 1
+        elif player.root_affinity == Affinity.WATER:
+            chance += 3
+            insight += 1
+        elif player.root_affinity == Affinity.EARTH:
+            chance += 2
+    elif item_id == "essence-pill":
+        if player.root_affinity == Affinity.FIRE:
+            chance += 4
+            double += 1
+        elif player.root_affinity == Affinity.EARTH:
+            chance += 4
+        elif player.root_affinity == Affinity.METAL:
+            chance += 2
+            double += 1
+    elif item_id == "insight-pill":
+        if player.root_affinity == Affinity.WATER:
+            chance += 4
+            insight += 1
+        elif player.root_affinity == Affinity.VOID:
+            chance += 5
+            double += 1
+            insight += 1
+        elif player.root_affinity == Affinity.WIND:
+            chance += 3
+    elif item_id == "marrow-pill":
+        if player.root_affinity == Affinity.THUNDER:
+            chance += 5
+            double += 1
+        elif player.root_affinity == Affinity.VOID:
+            chance += 6
+            insight += 1
+        elif player.root_affinity == Affinity.FIRE:
+            chance += 2
+
+    if method is not None and Affinity(str(method["affinity"])) == player.root_affinity:
+        chance += 2
+        if item_id in {"insight-pill", "marrow-pill"}:
+            double += 1
+
+    return {
+        "chance": chance,
+        "double": double,
+        "insight": insight,
+    }
+
+
+def _meditation_affinity_bias(player: Player, mode: MeditationMode) -> dict[str, float | int]:
+    reward = 0.0
+    insight = 0
+    breakthrough = 0
+
+    if mode == MeditationMode.BREATH:
+        if player.root_affinity == Affinity.WOOD:
+            reward += 0.06
+        elif player.root_affinity == Affinity.WATER:
+            reward += 0.04
+            insight += 1
+        elif player.root_affinity == Affinity.EARTH:
+            reward += 0.05
+            breakthrough += 1
+    elif mode == MeditationMode.CONDENSE:
+        if player.root_affinity == Affinity.EARTH:
+            reward += 0.05
+            breakthrough += 3
+        elif player.root_affinity == Affinity.METAL:
+            reward += 0.03
+            breakthrough += 2
+        elif player.root_affinity == Affinity.FIRE:
+            breakthrough += 2
+    elif mode == MeditationMode.INSIGHT:
+        if player.root_affinity == Affinity.WATER:
+            reward += 0.03
+            insight += 3
+        elif player.root_affinity == Affinity.VOID:
+            reward += 0.04
+            insight += 4
+        elif player.root_affinity == Affinity.WIND:
+            reward += 0.02
+            insight += 2
+    elif mode == MeditationMode.BREAKTHROUGH:
+        if player.root_affinity == Affinity.THUNDER:
+            breakthrough += 5
+        elif player.root_affinity == Affinity.FIRE:
+            breakthrough += 4
+        elif player.root_affinity == Affinity.METAL:
+            breakthrough += 3
+        elif player.root_affinity == Affinity.EARTH:
+            breakthrough += 2
+
+    if player.root_affinity == Affinity.VOID and mode != MeditationMode.BREAKTHROUGH:
+        insight += 1
+
+    return {
+        "reward": reward,
+        "insight": insight,
+        "breakthrough": breakthrough,
+    }
+
+
+def _root_loot_choice(
+    player: Player,
+    options: list[str] | tuple[str, ...],
+) -> str:
+    weighted = list(options)
+    preferences: dict[Affinity, tuple[str, ...]] = {
+        Affinity.WOOD: ("spirit-herb", "clear-dew", "longevity-fruit"),
+        Affinity.WATER: ("clear-dew", "moon-dust", "insight-pill"),
+        Affinity.FIRE: ("flame-sand", "essence-pill", "qigather"),
+        Affinity.EARTH: ("essence-pill", "longevity-fruit", "marrow-jade"),
+        Affinity.METAL: ("essence-pill", "method-fragment", "rebirth-mark"),
+        Affinity.WIND: ("method-fragment", "clear-dew", "longevity-fruit"),
+        Affinity.THUNDER: ("rebirth-mark", "flame-sand", "marrow-jade"),
+        Affinity.VOID: ("method-fragment", "moon-dust", "marrow-jade", "rebirth-mark"),
+    }
+    repeat = 2 + min(2, max(0, player.rebirth_count))
+    for preferred in preferences.get(player.root_affinity, ()):
+        if preferred in options:
+            weighted.extend([preferred] * repeat)
+    if player.root_trait == RootTrait.WANDERING and "method-fragment" in options:
+        weighted.extend(["method-fragment"] * 2)
+    if player.root_trait == RootTrait.EMBER and "rebirth-mark" in options:
+        weighted.extend(["rebirth-mark"] * max(1, min(3, player.rebirth_count or 1)))
+    if player.root_temperament == RootTemperament.TRANQUIL and "moon-dust" in options:
+        weighted.append("moon-dust")
+    if player.root_temperament == RootTemperament.FIERCE and "flame-sand" in options:
+        weighted.append("flame-sand")
+    return random.choice(weighted)
+
+
+def _root_affinity_duel_bonus(player: Player) -> int:
+    if player.root_affinity == Affinity.THUNDER:
+        return 6
+    if player.root_affinity == Affinity.FIRE:
+        return 4
+    if player.root_affinity == Affinity.WIND:
+        return 3
+    if player.root_affinity == Affinity.WATER:
+        return 2
+    if player.root_affinity == Affinity.METAL:
+        return 2
+    if player.root_affinity == Affinity.EARTH:
+        return 1
+    return 0
+
+
 def _method_style_modifiers(player: Player, method: dict[str, object]) -> dict[str, float | int]:
     style = MethodStyle(str(method["style"]))
     method_type = MethodType(str(method["method_type"]))
@@ -821,12 +1021,16 @@ def _method_totals(player: Player, method: dict[str, object]) -> dict[str, float
     affinity = Affinity(str(method["affinity"]))
     grade = MethodGrade(str(method["grade"]))
     style_modifiers = _method_style_modifiers(player, method)
+    affinity_bias = affinity_method_bias(player.root_affinity, affinity)
+    specialization_bonus = affinity_specialization_bonus(player.root_affinity, affinity)
     practice = (
         float(method["practice_bonus"])
         + method_grade_practice_bonus(grade)
         + _mastery_practice_bonus(mastery)
         + affinity_synergy(player.root_affinity, affinity)
         + float(style_modifiers["practice"])
+        + float(affinity_bias["practice"])
+        + float(specialization_bonus["practice"])
     )
     breakthrough = (
         int(float(method["breakthrough_bonus"]) * 100)
@@ -834,18 +1038,26 @@ def _method_totals(player: Player, method: dict[str, object]) -> dict[str, float
         + _mastery_breakthrough_bonus(mastery)
         + int(affinity_synergy(player.root_affinity, affinity) * 100 / 3)
         + int(style_modifiers["breakthrough"])
+        + int(affinity_bias["breakthrough"])
+        + int(specialization_bonus["breakthrough"])
     )
     insight = (
         float(method.get("insight_bonus", 0.0))
         + _mastery_insight_bonus(mastery)
         + affinity_synergy(player.root_affinity, affinity) / 2
         + float(style_modifiers["insight"])
+        + float(affinity_bias["insight"])
+        + float(specialization_bonus["insight"])
     )
     return {
         "practice": practice,
         "breakthrough": breakthrough,
         "insight": insight,
-        "adventure": int(style_modifiers["adventure"]),
+        "adventure": (
+            int(style_modifiers["adventure"])
+            + int(affinity_bias["adventure"])
+            + int(specialization_bonus["adventure"])
+        ),
     }
 
 
@@ -899,6 +1111,10 @@ def _lifespan_for_profile(root_type: RootType, root_trait: RootTrait) -> int:
 
 def _root_brief(player: Player) -> str:
     return f"{player.root_type.value}·{player.root_affinity.value}系·纯度{player.root_purity}·{player.root_temperament.value}/{player.root_trait.value}"
+
+
+def _root_growth_brief(player: Player) -> str:
+    return f"{_root_rarity_brief(player)} | 此生上限 { _realm_cap_brief(player) }"
 
 
 def _lifespan_reward_multiplier(player: Player) -> float:
@@ -1094,6 +1310,7 @@ def _duel_total(player: Player, method: dict[str, object] | None, roll_value: in
         total += min(18, int(float(method.get("practice_total", 0.0)) * 100 // 2))
         total += min(12, int(float(method.get("insight_total", 0.0)) * 100 // 3))
         total += min(14, int(method.get("mastery", 0)) // 18)
+    total += _root_affinity_duel_bonus(player)
     if player.root_affinity in {Affinity.THUNDER, Affinity.FIRE}:
         total += 4
     if player.root_trait == RootTrait.EMBER:
@@ -1677,7 +1894,7 @@ async def adventure(user_id: str) -> AdventureResult:
         insight_delta = 1 if random.random() < 0.35 else 0
         message = "你在历练中斩获颇丰，灵气流转颇为顺畅。"
         if random.random() < 0.35:
-            item_id = random.choice(["spirit-herb", "clear-dew"])
+            item_id = _root_loot_choice(player, ("spirit-herb", "clear-dew"))
     elif roll_value <= 103:
         cultivation_gain = random.randint(200, 340)
         spirit_stones_gain = random.randint(130, 240)
@@ -1691,7 +1908,7 @@ async def adventure(user_id: str) -> AdventureResult:
         elif luck_draw < 0.76:
             item_id = "longevity-fruit"
         elif luck_draw < 0.90:
-            item_id = random.choice(["flame-sand", "moon-dust"])
+            item_id = _root_loot_choice(player, ("flame-sand", "moon-dust"))
         else:
             item_id = "qigather"
     else:
@@ -1702,8 +1919,9 @@ async def adventure(user_id: str) -> AdventureResult:
             message = "你闯入了一处轮回者才可感知的遗迹夹层，古老气息扑面而来。"
         else:
             message = "你仰见星芒坠落，顺着灵机追索而去，竟得一桩超常机缘。"
-        item_id = "method-fragment" if player.rebirth_count < 2 else random.choice(
-            ["method-fragment", "longevity-fruit", "rebirth-mark", "marrow-jade"]
+        item_id = "method-fragment" if player.rebirth_count < 2 else _root_loot_choice(
+            player,
+            ("method-fragment", "longevity-fruit", "rebirth-mark", "marrow-jade"),
         )
 
     reward_multiplier = _lifespan_reward_multiplier(player)
@@ -1963,6 +2181,8 @@ async def start_meditation(
     breakthrough_factor = _root_breakthrough_total(player) + (
         0 if primary_method is None else int(primary_method.get("breakthrough_total", 0))
     )
+    affinity_bias = _meditation_affinity_bias(player, meditation_mode)
+    reward = int(reward * (1 + float(affinity_bias["reward"])))
 
     if meditation_mode == MeditationMode.BREATH:
         insight_reward = max(0, minutes // 90)
@@ -1985,6 +2205,8 @@ async def start_meditation(
         breakthrough_reward += int(
             breakthrough_reward * float(event_bonus_values.get("meditation_breakthrough_multiplier", 0.0))
         )
+    insight_reward += int(affinity_bias["insight"])
+    breakthrough_reward += int(affinity_bias["breakthrough"])
 
     started_at = _now()
     until = started_at + timedelta(minutes=minutes)
@@ -2108,8 +2330,11 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
     event_bonus_values = _world_event_bonus_values(str(world_event["event_key"]))
     event_failure_guard = int(event_bonus_values.get("breakthrough_guard", 0))
     target = next_realm(player.realm)
+    realm_cap = _effective_max_realm(player)
 
-    if target is None:
+    if target is None or realm_index(target) > realm_index(realm_cap):
+        if player.realm != realm_cap:
+            raise GameError("realm_maxed")
         if player.realm != Realm.SPIRIT_4:
             raise GameError("realm_maxed")
         if player.cultivation < realm_requirement(player.realm):
@@ -2417,6 +2642,8 @@ async def craft_elixir(user_id: str, recipe_name: str) -> AlchemyResult:
     alchemy_bonus = _destiny_alchemy_bonus(player)
     chance += alchemy_bonus
     chance += int(event_bonus_values.get("alchemy_chance", 0))
+    affinity_bias = _alchemy_affinity_bias(player, recipe, primary_method)
+    chance += int(affinity_bias["chance"])
     if primary_method is not None:
         chance += min(8, int(float(primary_method.get("insight_total", 0.0)) * 100 // 4))
         chance += min(6, int(primary_method.get("mastery", 0)) // 40)
@@ -2444,7 +2671,7 @@ async def craft_elixir(user_id: str, recipe_name: str) -> AlchemyResult:
     if roll_value <= chance:
         quantity = 1
         insight_gain = 0
-        double_threshold = max(8, chance // 6)
+        double_threshold = max(8, chance // 6) + int(affinity_bias["double"]) * 2
         if player.destiny_type == DestinyType.ALCHEMY:
             double_threshold += max(1, player.destiny_level // 2)
         elif player.destiny_type == DestinyType.WISDOM:
@@ -2452,6 +2679,7 @@ async def craft_elixir(user_id: str, recipe_name: str) -> AlchemyResult:
         if roll_value <= min(24, double_threshold):
             quantity = 2
             insight_gain = 1 + int(event_bonus_values.get("alchemy_insight", 0))
+            insight_gain += int(affinity_bias["insight"])
         await repo.add_inventory_item(user_id, item_id, quantity)
         if insight_gain:
             await repo.update_player_stats(user_id, insight_delta=insight_gain)
@@ -2790,6 +3018,7 @@ async def rebirth(user_id: str) -> RebirthResult:
         legacy_points_gained=outcome.legacy_points_gained,
         unlocked_features=[unlock.value for unlock in outcome.unlocked_features],
         new_root_floor=outcome.next_root_floor.value,
+        new_realm_cap=outcome.next_realm_cap.value,
         root_brief=_root_brief(refreshed),
         destiny_name=destiny_result.destiny_name,
         destiny_level=destiny_result.destiny_level,
