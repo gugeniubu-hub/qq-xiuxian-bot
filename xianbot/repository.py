@@ -17,12 +17,51 @@ class GameRepository:
 
     @asynccontextmanager
     async def _connect(self) -> AsyncIterator[aiosqlite.Connection]:
-        connection = await aiosqlite.connect(self.db_path)
+        connection = await aiosqlite.connect(self.db_path, timeout=30)
         connection.row_factory = aiosqlite.Row
+        await connection.execute("PRAGMA journal_mode=WAL")
+        await connection.execute("PRAGMA synchronous=NORMAL")
+        await connection.execute("PRAGMA foreign_keys=ON")
+        await connection.execute("PRAGMA busy_timeout = 30000")
         try:
             yield connection
         finally:
             await connection.close()
+
+    def _player_insert_params(self, player: Player) -> tuple[Any, ...]:
+        return (
+            player.user_id,
+            player.nickname,
+            player.root_type.value,
+            player.root_affinity.value,
+            player.root_purity,
+            player.root_temperament.value,
+            player.root_trait.value,
+            player.realm.value,
+            player.cultivation,
+            player.age,
+            player.age_progress,
+            player.lifespan,
+            player.spirit_stones,
+            player.fortune,
+            player.stamina,
+            player.comprehension,
+            player.insight,
+            player.breakthrough_ready,
+            player.rebirth_count,
+            player.soul_marks,
+            player.legacy_points,
+            player.sect_id,
+            player.primary_method_id,
+            player.meditation_started_at,
+            player.meditation_until,
+            player.meditation_minutes,
+            player.meditation_reward,
+            player.meditation_method_id,
+            None if player.meditation_mode is None else player.meditation_mode.value,
+            player.meditation_insight_reward,
+            player.meditation_breakthrough_reward,
+        )
 
     async def _fetchone(
         self,
@@ -167,42 +206,50 @@ class GameRepository:
                   meditation_breakthrough_reward
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    player.user_id,
-                    player.nickname,
-                    player.root_type.value,
-                    player.root_affinity.value,
-                    player.root_purity,
-                    player.root_temperament.value,
-                    player.root_trait.value,
-                    player.realm.value,
-                    player.cultivation,
-                    player.age,
-                    player.age_progress,
-                    player.lifespan,
-                    player.spirit_stones,
-                    player.fortune,
-                    player.stamina,
-                    player.comprehension,
-                    player.insight,
-                    player.breakthrough_ready,
-                    player.rebirth_count,
-                    player.soul_marks,
-                    player.legacy_points,
-                    player.sect_id,
-                    player.primary_method_id,
-                    player.meditation_started_at,
-                    player.meditation_until,
-                    player.meditation_minutes,
-                    player.meditation_reward,
-                    player.meditation_method_id,
-                    None if player.meditation_mode is None else player.meditation_mode.value,
-                    player.meditation_insight_reward,
-                    player.meditation_breakthrough_reward,
-                ),
+                self._player_insert_params(player),
             )
             await db.commit()
         return player
+
+    async def create_player_with_starter_items(
+        self,
+        player: Player,
+        starter_items: list[tuple[str, int]],
+    ) -> bool:
+        async with self._connect() as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    INSERT OR IGNORE INTO players (
+                      user_id, nickname, root_type, root_affinity, root_purity, root_temperament,
+                      root_trait, realm, cultivation, age, age_progress, lifespan,
+                      spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
+                      rebirth_count, soul_marks, legacy_points, sect_id, primary_method_id,
+                      meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
+                      meditation_method_id, meditation_mode, meditation_insight_reward,
+                      meditation_breakthrough_reward
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    self._player_insert_params(player),
+                )
+                created = cursor.rowcount > 0
+                if created:
+                    for item_id, quantity in starter_items:
+                        await db.execute(
+                            """
+                            INSERT INTO inventories (user_id, item_id, quantity)
+                            VALUES (?, ?, ?)
+                            ON CONFLICT(user_id, item_id)
+                            DO UPDATE SET quantity = quantity + excluded.quantity
+                            """,
+                            (player.user_id, item_id, quantity),
+                        )
+                await db.commit()
+                return created
+            except Exception:
+                await db.rollback()
+                raise
 
     async def update_player_stats(
         self,
@@ -490,6 +537,85 @@ class GameRepository:
             )
             await db.commit()
 
+    async def claim_signin(
+        self,
+        user_id: str,
+        sign_date: str,
+        *,
+        base_reward: int,
+        cultivation_gain: int,
+        fortune_roll: int,
+        pool_release_rate: float,
+        stamina_delta: int,
+    ) -> int | None:
+        async with self._connect() as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                existing = await self._fetchone(
+                    db,
+                    """
+                    SELECT 1
+                    FROM daily_signins
+                    WHERE user_id = ? AND sign_date = ?
+                    """,
+                    (user_id, sign_date),
+                )
+                if existing is not None:
+                    await db.rollback()
+                    return None
+
+                pool_row = await self._fetchone(
+                    db,
+                    "SELECT amount FROM fortune_pool WHERE id = 1",
+                )
+                current_pool = 0 if pool_row is None else int(pool_row["amount"])
+                releasable = int(current_pool * pool_release_rate)
+                pool_reward = 0
+                if releasable > 0:
+                    if fortune_roll >= 96:
+                        pool_reward = max(1, int(releasable * 0.60))
+                    elif fortune_roll >= 80:
+                        pool_reward = max(1, int(releasable * 0.35))
+                    elif fortune_roll >= 50:
+                        pool_reward = max(1, int(releasable * 0.20))
+                    else:
+                        pool_reward = max(1, int(releasable * 0.10))
+                    pool_reward = min(pool_reward, current_pool)
+                    await db.execute(
+                        """
+                        UPDATE fortune_pool
+                        SET amount = amount - ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = 1
+                        """,
+                        (pool_reward,),
+                    )
+
+                await db.execute(
+                    """
+                    INSERT INTO daily_signins (
+                      user_id, sign_date, base_reward, pool_reward, fortune_roll
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (user_id, sign_date, base_reward, pool_reward, fortune_roll),
+                )
+                await db.execute(
+                    """
+                    UPDATE players
+                    SET
+                      spirit_stones = spirit_stones + ?,
+                      cultivation = cultivation + ?,
+                      stamina = MIN(MAX(stamina + ?, 0), 100),
+                      updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ?
+                    """,
+                    (base_reward + pool_reward, cultivation_gain, stamina_delta, user_id),
+                )
+                await db.commit()
+                return pool_reward
+            except Exception:
+                await db.rollback()
+                raise
+
     async def list_accessible_sects(self, rebirth_count: int) -> list[dict[str, Any]]:
         async with self._connect() as db:
             rows = await self._fetchall(
@@ -741,26 +867,20 @@ class GameRepository:
             await db.commit()
 
     async def remove_inventory_item(self, user_id: str, item_id: str, quantity: int) -> bool:
+        if quantity <= 0:
+            return False
         async with self._connect() as db:
-            row = await self._fetchone(
-                db,
-                """
-                SELECT quantity
-                FROM inventories
-                WHERE user_id = ? AND item_id = ?
-                """,
-                (user_id, item_id),
-            )
-            if row is None or int(row["quantity"]) < quantity:
-                return False
-            await db.execute(
+            cursor = await db.execute(
                 """
                 UPDATE inventories
                 SET quantity = quantity - ?
-                WHERE user_id = ? AND item_id = ?
+                WHERE user_id = ? AND item_id = ? AND quantity >= ?
                 """,
-                (quantity, user_id, item_id),
+                (quantity, user_id, item_id, quantity),
             )
+            if cursor.rowcount <= 0:
+                await db.rollback()
+                return False
             await db.execute(
                 """
                 DELETE FROM inventories
@@ -770,6 +890,43 @@ class GameRepository:
             )
             await db.commit()
         return True
+
+    async def consume_inventory_items(
+        self,
+        user_id: str,
+        items: list[tuple[str, int]],
+    ) -> bool:
+        async with self._connect() as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                for item_id, quantity in items:
+                    if quantity <= 0:
+                        await db.rollback()
+                        return False
+                    cursor = await db.execute(
+                        """
+                        UPDATE inventories
+                        SET quantity = quantity - ?
+                        WHERE user_id = ? AND item_id = ? AND quantity >= ?
+                        """,
+                        (quantity, user_id, item_id, quantity),
+                    )
+                    if cursor.rowcount <= 0:
+                        await db.rollback()
+                        return False
+                for item_id, _ in items:
+                    await db.execute(
+                        """
+                        DELETE FROM inventories
+                        WHERE user_id = ? AND item_id = ? AND quantity <= 0
+                        """,
+                        (user_id, item_id),
+                    )
+                await db.commit()
+                return True
+            except Exception:
+                await db.rollback()
+                raise
 
     async def record_adventure(
         self,
@@ -894,6 +1051,48 @@ class GameRepository:
             await db.commit()
         return int(cursor.lastrowid)
 
+    async def create_market_listing_from_inventory(
+        self,
+        seller_user_id: str,
+        item_id: str,
+        quantity: int,
+        unit_price: int,
+    ) -> int | None:
+        async with self._connect() as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                remove_cursor = await db.execute(
+                    """
+                    UPDATE inventories
+                    SET quantity = quantity - ?
+                    WHERE user_id = ? AND item_id = ? AND quantity >= ?
+                    """,
+                    (quantity, seller_user_id, item_id, quantity),
+                )
+                if remove_cursor.rowcount <= 0:
+                    await db.rollback()
+                    return None
+                await db.execute(
+                    """
+                    DELETE FROM inventories
+                    WHERE user_id = ? AND item_id = ? AND quantity <= 0
+                    """,
+                    (seller_user_id, item_id),
+                )
+                cursor = await db.execute(
+                    """
+                    INSERT INTO market_listings (
+                      seller_user_id, item_id, quantity, unit_price, status
+                    ) VALUES (?, ?, ?, ?, 'active')
+                    """,
+                    (seller_user_id, item_id, quantity, unit_price),
+                )
+                await db.commit()
+                return int(cursor.lastrowid)
+            except Exception:
+                await db.rollback()
+                raise
+
     async def get_market_listing(self, listing_id: int) -> dict[str, Any] | None:
         async with self._connect() as db:
             row = await self._fetchone(
@@ -929,6 +1128,110 @@ class GameRepository:
                 (buyer_user_id, listing_id),
             )
             await db.commit()
+
+    async def purchase_market_listing(
+        self,
+        buyer_user_id: str,
+        listing_id: int,
+        fee_rate: float,
+    ) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                listing = await self._fetchone(
+                    db,
+                    """
+                    SELECT
+                      ml.id,
+                      ml.seller_user_id,
+                      p.nickname AS seller_name,
+                      ml.item_id,
+                      it.name AS item_name,
+                      ml.quantity,
+                      ml.unit_price,
+                      ml.status
+                    FROM market_listings ml
+                    INNER JOIN players p ON p.user_id = ml.seller_user_id
+                    INNER JOIN items it ON it.id = ml.item_id
+                    WHERE ml.id = ?
+                    """,
+                    (listing_id,),
+                )
+                if listing is None:
+                    await db.rollback()
+                    return None
+                if str(listing["status"]) != "active":
+                    await db.rollback()
+                    return {"reason": "listing_unavailable"}
+                if str(listing["seller_user_id"]) == buyer_user_id:
+                    await db.rollback()
+                    return {"reason": "cannot_buy_own_listing"}
+
+                total_price = int(listing["quantity"]) * int(listing["unit_price"])
+                fee = max(1, int(total_price * fee_rate))
+                seller_income = total_price - fee
+
+                buyer_cursor = await db.execute(
+                    """
+                    UPDATE players
+                    SET spirit_stones = spirit_stones - ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ? AND spirit_stones >= ?
+                    """,
+                    (total_price, buyer_user_id, total_price),
+                )
+                if buyer_cursor.rowcount <= 0:
+                    await db.rollback()
+                    return {"reason": "not_enough_spirit_stones"}
+
+                sold_cursor = await db.execute(
+                    """
+                    UPDATE market_listings
+                    SET status = 'sold', buyer_user_id = ?, sold_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND status = 'active'
+                    """,
+                    (buyer_user_id, listing_id),
+                )
+                if sold_cursor.rowcount <= 0:
+                    await db.rollback()
+                    return {"reason": "listing_unavailable"}
+
+                await db.execute(
+                    """
+                    UPDATE players
+                    SET spirit_stones = spirit_stones + ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ?
+                    """,
+                    (seller_income, str(listing["seller_user_id"])),
+                )
+                await db.execute(
+                    """
+                    UPDATE fortune_pool
+                    SET amount = amount + ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = 1
+                    """,
+                    (fee,),
+                )
+                await db.execute(
+                    """
+                    INSERT INTO inventories (user_id, item_id, quantity)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(user_id, item_id)
+                    DO UPDATE SET quantity = quantity + excluded.quantity
+                    """,
+                    (buyer_user_id, str(listing["item_id"]), int(listing["quantity"])),
+                )
+                await db.commit()
+                return {
+                    "listing_id": int(listing["id"]),
+                    "item_name": str(listing["item_name"]),
+                    "quantity": int(listing["quantity"]),
+                    "total_price": total_price,
+                    "fee": fee,
+                    "seller_name": str(listing["seller_name"]),
+                }
+            except Exception:
+                await db.rollback()
+                raise
 
     async def list_top_players(self, limit: int = 10) -> list[dict[str, Any]]:
         async with self._connect() as db:

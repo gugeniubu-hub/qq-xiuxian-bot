@@ -1,4 +1,5 @@
 import asyncio
+from collections import Counter
 
 from xianbot.config import get_settings
 from xianbot.database import initialize_database
@@ -7,6 +8,7 @@ from xianbot.repository import GameRepository
 from xianbot.services import (
     adventure,
     breakthrough,
+    buy_market_listing,
     contemplate_method,
     craft_elixir,
     create_market_listing,
@@ -44,6 +46,144 @@ def test_create_player_and_sign_in(tmp_path, monkeypatch) -> None:
         updated = await get_player_status("10001")
         assert updated is not None
         assert updated.spirit_stones >= 420
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_multi_user_concurrency_and_storage_integrity(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian7.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        ids = [f"200{i:02d}" for i in range(1, 13)]
+
+        created = await asyncio.gather(
+            *(create_player_if_missing(user_id, f"user{index}") for index, user_id in enumerate(ids, start=1))
+        )
+        assert all(result[0].user_id in ids for result in created)
+        assert sum(1 for _, was_created in created if was_created) == len(ids)
+
+        duplicated = await asyncio.gather(
+            *(create_player_if_missing(ids[0], "same-user") for _ in range(6))
+        )
+        assert sum(1 for _, was_created in duplicated if was_created) == 0
+
+        sign_results = await asyncio.gather(*(sign_in(user_id) for user_id in ids))
+        assert len(sign_results) == len(ids)
+        assert all(result.total_spirit_stones >= 420 for result in sign_results)
+
+        persisted = await asyncio.gather(*(get_player_status(user_id) for user_id in ids))
+        assert all(player is not None for player in persisted)
+        assert len({player.user_id for player in persisted if player is not None}) == len(ids)
+
+        repo = GameRepository(get_settings().database_url)
+        one = await repo.get_player(ids[0])
+        assert one is not None
+        assert one.inventory["qigather"] >= 2
+        assert one.inventory["spirit-herb"] >= 3
+        assert one.inventory["clear-dew"] >= 2
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_market_purchase_is_atomic_under_concurrency(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian8.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("30001", "seller")
+        await create_player_if_missing("30002", "buyer1")
+        await create_player_if_missing("30003", "buyer2")
+
+        listing = await create_market_listing("30001", "灵草", 40, 1)
+
+        async def try_buy(user_id: str) -> str:
+            try:
+                result = await buy_market_listing(user_id, listing.listing_id)
+                return f"ok:{result.seller_name}"
+            except Exception as exc:  # noqa: BLE001
+                return str(exc)
+
+        results = await asyncio.gather(
+            try_buy("30002"),
+            try_buy("30003"),
+        )
+        counter = Counter(results)
+        assert sum(1 for item in results if item.startswith("ok:")) == 1, results
+        assert counter["listing_unavailable"] == 1, results
+
+        repo = GameRepository(get_settings().database_url)
+        sold = await repo.get_market_listing(listing.listing_id)
+        assert sold is not None
+        assert sold["status"] == "sold"
+
+        buyers = [await get_player_status("30002"), await get_player_status("30003")]
+        inventories = [await list_inventory("30002"), await list_inventory("30003")]
+        bought_counts = [
+            next((item["quantity"] for item in bag if item["name"] == "灵草"), 0)
+            for bag in inventories
+        ]
+        assert sorted(bought_counts) == [3, 4]
+        assert all(player is not None for player in buyers)
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_duel_randomness_and_influences_are_applied(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian9.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("40001", "stronger")
+        await create_player_if_missing("40002", "weaker")
+        await join_sect("40001", "赤霄门")
+        await join_sect("40002", "青岚宗")
+
+        repo = GameRepository(get_settings().database_url)
+        await repo.update_player_stats(
+            "40001",
+            realm=Realm.FOUNDATION_3,
+            cultivation_delta=2200,
+            insight_delta=30,
+            breakthrough_ready_delta=40,
+            fortune_delta=20,
+        )
+        await repo.update_player_stats(
+            "40002",
+            realm=Realm.QI_3,
+            cultivation_delta=250,
+            insight_delta=2,
+            breakthrough_ready_delta=2,
+            fortune_delta=1,
+        )
+
+        results = []
+        for _ in range(12):
+            duel_result = await duel("40001", "40002")
+            results.append(duel_result)
+            await repo.update_player_stats("40001", stamina_delta=100)
+            await repo.update_player_stats("40002", stamina_delta=100)
+
+        assert any(result.attacker_roll != result.defender_roll for result in results)
+        assert any(result.attacker_total != result.defender_total for result in results)
+        assert all(result.winner_name == "stronger" for result in results)
+        assert all(result.attacker_total > result.defender_total for result in results)
+
+        stronger = await get_player_status("40001")
+        weaker = await get_player_status("40002")
+        assert stronger is not None
+        assert weaker is not None
+        assert stronger.spirit_stones > weaker.spirit_stones
+        assert weaker.cultivation >= 0
 
     asyncio.run(scenario())
     get_settings.cache_clear()

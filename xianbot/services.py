@@ -987,11 +987,18 @@ async def create_player_if_missing(user_id: str, nickname: str) -> tuple[Player,
         comprehension=comprehension,
         stamina=100,
     )
-    await repo.create_player(player)
-    await repo.add_inventory_item(user_id, "qigather", 2)
-    await repo.add_inventory_item(user_id, "spirit-herb", 3)
-    await repo.add_inventory_item(user_id, "clear-dew", 2)
-    return await repo.get_player(user_id) or player, True
+    created = await repo.create_player_with_starter_items(
+        player,
+        [
+            ("qigather", 2),
+            ("spirit-herb", 3),
+            ("clear-dew", 2),
+        ],
+    )
+    latest = await repo.get_player(user_id)
+    if latest is not None:
+        return latest, created
+    return player, created
 
 
 async def get_player_status(user_id: str) -> Player | None:
@@ -1028,9 +1035,6 @@ async def sign_in(user_id: str) -> SignInResult:
         raise GameError("player_not_found")
 
     sign_date = _today().isoformat()
-    if await repo.get_today_signin(user_id, sign_date):
-        raise GameError("already_signed")
-
     world_state = await _get_today_world_state()
     settings = get_settings()
     base_reward = random.randint(
@@ -1042,35 +1046,17 @@ async def sign_in(user_id: str) -> SignInResult:
         settings.sign_in_cultivation_max + player.comprehension,
     )
     fortune_roll = min(100, random.randint(1, 100) + world_state.fortune_bonus)
-
-    current_pool = await repo.get_fortune_pool_amount()
-    releasable = int(current_pool * settings.daily_pool_release_rate)
-    pool_reward = 0
-    if releasable > 0:
-        if fortune_roll >= 96:
-            pool_reward = max(1, int(releasable * 0.60))
-        elif fortune_roll >= 80:
-            pool_reward = max(1, int(releasable * 0.35))
-        elif fortune_roll >= 50:
-            pool_reward = max(1, int(releasable * 0.20))
-        else:
-            pool_reward = max(1, int(releasable * 0.10))
-        pool_reward = min(pool_reward, current_pool)
-        await repo.adjust_fortune_pool(-pool_reward)
-
-    await repo.update_player_stats(
+    pool_reward = await repo.claim_signin(
         user_id,
-        spirit_stones_delta=base_reward + pool_reward,
-        cultivation_delta=cultivation_gain,
+        sign_date,
+        base_reward=base_reward,
+        cultivation_gain=cultivation_gain,
+        fortune_roll=fortune_roll,
+        pool_release_rate=settings.daily_pool_release_rate,
         stamina_delta=12,
     )
-    await repo.record_signin(
-        user_id=user_id,
-        sign_date=sign_date,
-        base_reward=base_reward,
-        pool_reward=pool_reward,
-        fortune_roll=fortune_roll,
-    )
+    if pool_reward is None:
+        raise GameError("already_signed")
 
     updated = await repo.get_player(user_id)
     assert updated is not None
@@ -1851,14 +1837,15 @@ async def craft_elixir(user_id: str, recipe_name: str) -> AlchemyResult:
     methods = await _load_methods(repo, player)
     primary_method = _primary_method(player, methods)
     materials = tuple(recipe["materials"])
-    for item_id, _, quantity in materials:
-        if player.inventory.get(str(item_id), 0) < int(quantity):
-            raise GameError("not_enough_materials")
+    if any(player.inventory.get(str(item_id), 0) < int(quantity) for item_id, _, quantity in materials):
+        raise GameError("not_enough_materials")
 
-    for item_id, _, quantity in materials:
-        removed = await repo.remove_inventory_item(user_id, str(item_id), int(quantity))
-        if not removed:
-            raise GameError("not_enough_materials")
+    removed = await repo.consume_inventory_items(
+        user_id,
+        [(str(item_id), int(quantity)) for item_id, _, quantity in materials],
+    )
+    if not removed:
+        raise GameError("not_enough_materials")
 
     world_state = await _get_today_world_state()
     chance = int(recipe["base_chance"])
@@ -2106,12 +2093,14 @@ async def create_market_listing(
         raise GameError("item_not_found")
     if int(item["tradable"]) != 1:
         raise GameError("item_not_tradable")
-
-    removed = await repo.remove_inventory_item(user_id, str(item["id"]), quantity)
-    if not removed:
+    listing_id = await repo.create_market_listing_from_inventory(
+        user_id,
+        str(item["id"]),
+        quantity,
+        unit_price,
+    )
+    if listing_id is None:
         raise GameError("not_enough_items")
-
-    listing_id = await repo.create_market_listing(user_id, str(item["id"]), quantity, unit_price)
     return MarketCreateResult(
         listing_id=listing_id,
         item_name=str(item["name"]),
@@ -2125,35 +2114,27 @@ async def buy_market_listing(user_id: str, listing_id: int) -> MarketBuyResult:
     buyer = await repo.get_player(user_id)
     if buyer is None:
         raise GameError("player_not_found")
-
     listing = await repo.get_market_listing(listing_id)
     if listing is None:
         raise GameError("listing_not_found")
-    if str(listing["status"]) != "active":
-        raise GameError("listing_unavailable")
-    if str(listing["seller_user_id"]) == user_id:
-        raise GameError("cannot_buy_own_listing")
-
-    total_price = int(listing["quantity"]) * int(listing["unit_price"])
-    if buyer.spirit_stones < total_price:
-        raise GameError("not_enough_spirit_stones")
-
-    fee = max(1, int(total_price * get_settings().market_fee_rate))
-    seller_income = total_price - fee
-
-    await repo.update_player_stats(user_id, spirit_stones_delta=-total_price)
-    await repo.update_player_stats(str(listing["seller_user_id"]), spirit_stones_delta=seller_income)
-    await repo.adjust_fortune_pool(fee)
-    await repo.add_inventory_item(user_id, str(listing["item_id"]), int(listing["quantity"]))
-    await repo.mark_market_listing_sold(listing_id, user_id)
+    purchase = await repo.purchase_market_listing(
+        user_id,
+        listing_id,
+        get_settings().market_fee_rate,
+    )
+    if purchase is None:
+        raise GameError("listing_not_found")
+    reason = purchase.get("reason")
+    if reason is not None:
+        raise GameError(str(reason))
 
     return MarketBuyResult(
-        listing_id=listing_id,
-        item_name=str(listing["item_name"]),
-        quantity=int(listing["quantity"]),
-        total_price=total_price,
-        fee=fee,
-        seller_name=str(listing["seller_name"]),
+        listing_id=int(purchase["listing_id"]),
+        item_name=str(purchase["item_name"]),
+        quantity=int(purchase["quantity"]),
+        total_price=int(purchase["total_price"]),
+        fee=int(purchase["fee"]),
+        seller_name=str(purchase["seller_name"]),
     )
 
 
