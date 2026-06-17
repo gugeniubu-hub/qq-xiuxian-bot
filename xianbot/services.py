@@ -442,6 +442,19 @@ class WorldEventClaimResult:
 
 
 @dataclass(slots=True)
+class AncientTrialResult:
+    trial_name: str
+    roll_value: int
+    chance_percent: int
+    success: bool
+    reward_spirit_stones: int
+    reward_cultivation: int
+    reward_insight: int
+    reward_item_name: str | None
+    message: str
+
+
+@dataclass(slots=True)
 class AdventureResult:
     roll_value: int
     message: str
@@ -958,6 +971,18 @@ def _root_affinity_duel_bonus(player: Player) -> int:
     if player.root_affinity == Affinity.EARTH:
         return 1
     return 0
+
+
+def _ancient_trial_item_id(player: Player) -> str:
+    if player.rebirth_count >= 3:
+        return _root_loot_choice(
+            player,
+            ("rebirth-mark", "marrow-jade", "method-fragment", "longevity-fruit"),
+        )
+    return _root_loot_choice(
+        player,
+        ("method-fragment", "moon-dust", "longevity-fruit"),
+    )
 
 
 def _method_style_modifiers(player: Player, method: dict[str, object]) -> dict[str, float | int]:
@@ -2885,6 +2910,89 @@ async def contemplate_method(user_id: str, method_name: str | None = None) -> Me
         insight_gain=insight_gain,
         breakthrough_ready_gain=breakthrough_gain,
         event_notice=event_notice,
+    )
+
+
+async def explore_ancient_trial(user_id: str) -> AncientTrialResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+    if player.rebirth_count < 2:
+        raise GameError("ancient_trial_locked")
+    if player.stamina < 18:
+        raise GameError("not_enough_stamina")
+
+    methods = await _load_methods(repo, player)
+    primary_method = _primary_method(player, methods)
+    world_state = await _get_today_world_state()
+
+    chance = 42
+    chance += min(12, player.rebirth_count * 3)
+    chance += min(10, player.insight // 4)
+    chance += min(8, player.comprehension // 3)
+    chance += min(8, player.breakthrough_ready // 8)
+    chance += _root_breakthrough_total(player) // 2
+    chance += int(_insight_multiplier(player, primary_method) * 20)
+    if primary_method is not None and MethodStyle(str(primary_method["style"])) == MethodStyle.REBIRTH:
+        chance += 8
+    if player.root_affinity in {Affinity.VOID, Affinity.THUNDER}:
+        chance += 6
+    chance += world_state.encounter_bonus // 2
+    chance = max(28, min(chance, 94))
+
+    roll_value = random.randint(1, 100)
+    reward_spirit = 0
+    reward_cultivation = 0
+    reward_insight = 0
+    reward_item_name: str | None = None
+
+    if roll_value <= chance:
+        reward_spirit = random.randint(90, 170) + player.rebirth_count * 20
+        reward_cultivation = random.randint(180, 320)
+        reward_cultivation = int(reward_cultivation * (1 + _training_multiplier(player, primary_method)))
+        reward_insight = random.randint(2, 4) + max(1, player.rebirth_count - 1)
+        item_id = _ancient_trial_item_id(player)
+        item = await repo.get_item_by_id(item_id)
+        if item is not None:
+            reward_item_name = str(item["name"])
+            await repo.add_inventory_item(user_id, item_id, 1)
+        await repo.update_player_stats(
+            user_id,
+            spirit_stones_delta=reward_spirit,
+            cultivation_delta=reward_cultivation,
+            insight_delta=reward_insight,
+            stamina_delta=-18,
+        )
+        message = "你在太虚古藏的残壁间稳住了神识，接住了一缕前尘回响。"
+        return AncientTrialResult(
+            trial_name="太虚古藏试炼",
+            roll_value=roll_value,
+            chance_percent=chance,
+            success=True,
+            reward_spirit_stones=reward_spirit,
+            reward_cultivation=reward_cultivation,
+            reward_insight=reward_insight,
+            reward_item_name=reward_item_name,
+            message=message,
+        )
+
+    cultivation_loss = -max(40, int(max(player.cultivation, 600) * 0.06))
+    await repo.update_player_stats(
+        user_id,
+        cultivation_delta=cultivation_loss,
+        stamina_delta=-18,
+    )
+    return AncientTrialResult(
+        trial_name="太虚古藏试炼",
+        roll_value=roll_value,
+        chance_percent=chance,
+        success=False,
+        reward_spirit_stones=0,
+        reward_cultivation=cultivation_loss,
+        reward_insight=0,
+        reward_item_name=None,
+        message="古藏残响反噬心神，你强行退了出来，只留下一身余震。",
     )
 
 

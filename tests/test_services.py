@@ -18,6 +18,7 @@ from xianbot.services import (
     duel,
     encounter,
     end_meditation,
+    explore_ancient_trial,
     get_destiny_status,
     get_player_methods,
     get_player_status,
@@ -742,6 +743,61 @@ def test_world_state_encounter_and_method_growth(tmp_path, monkeypatch) -> None:
         assert insight.mastery_gain > 0
         assert insight.new_mastery >= insight.mastery_gain
         assert insight.insight_gain > 0
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_ancient_trial_requires_rebirth_and_rewards_rebirth_players(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian19.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("90001", "trialer")
+        repo = GameRepository(get_settings().database_url)
+
+        try:
+            await explore_ancient_trial("90001")
+        except ValueError as exc:
+            assert str(exc) == "ancient_trial_locked"
+        else:
+            raise AssertionError("ancient trial should require at least two rebirths")
+
+        await repo.update_player_stats(
+            "90001",
+            rebirth_count_delta=2,
+            root_type=RootType.HEAVEN,
+            root_affinity=Affinity.VOID,
+            root_purity=95,
+            root_temperament=RootTemperament.ENLIGHTENED,
+            root_trait=RootTrait.EMBER,
+            insight_delta=40,
+            breakthrough_ready_delta=40,
+        )
+        await join_sect("90001", "太虚观")
+        await repo.grant_player_method("90001", "void-scripture")
+        await set_primary_method("90001", "太虚轮回经")
+
+        import xianbot.services as services
+
+        original_randint = services.random.randint
+        services.random.randint = lambda a, b: 12
+        try:
+            result = await explore_ancient_trial("90001")
+        finally:
+            services.random.randint = original_randint
+
+        assert result.success is True
+        assert result.reward_spirit_stones > 0
+        assert result.reward_cultivation > 0
+        assert result.reward_insight > 0
+        assert result.reward_item_name is not None
+
+        player = await get_player_status("90001")
+        assert player is not None
+        assert player.stamina <= 82
 
     asyncio.run(scenario())
     get_settings.cache_clear()

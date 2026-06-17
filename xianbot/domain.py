@@ -53,6 +53,7 @@ class RebirthUnlock(StrEnum):
     ANCIENT_METHODS = "古传承"
     VOID_MARKET = "虚市交易位"
     HIGHER_ROOT_FLOOR = "高阶灵根保底"
+    ANCIENT_TRIAL = "古藏试炼"
 
 
 class DestinyType(StrEnum):

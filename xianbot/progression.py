@@ -45,6 +45,7 @@ def unlocks_for_rebirth_count(rebirth_count: int) -> list[RebirthUnlock]:
             [
                 RebirthUnlock.DESTINY_SYSTEM,
                 RebirthUnlock.VOID_MARKET,
+                RebirthUnlock.ANCIENT_TRIAL,
             ]
         )
     if rebirth_count >= 3:

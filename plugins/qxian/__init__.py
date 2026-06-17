@@ -28,6 +28,7 @@ from xianbot.services import (
     duel,
     encounter,
     end_meditation,
+    explore_ancient_trial,
     get_player_methods,
     get_player_status,
     get_rankings,
@@ -68,6 +69,7 @@ meditate_cmd = on_command("闭关")
 leave_meditation_cmd = on_command("出关")
 consume_cmd = on_command("服用")
 insight_cmd = on_command("参悟")
+ancient_trial_cmd = on_command("古藏试炼", aliases={"古藏", "轮回试炼"})
 alchemy_cmd = on_command("炼丹")
 duel_cmd = on_command("斗法", aliases={"pk", "PK"})
 market_list_cmd = on_command("坊市")
@@ -644,6 +646,35 @@ async def handle_insight(event: MessageEvent, args: Message = CommandArg()) -> N
     if result.event_notice:
         lines.append(result.event_notice)
     await insight_cmd.finish("\n".join(lines))
+
+
+@ancient_trial_cmd.handle()
+async def handle_ancient_trial(event: MessageEvent) -> None:
+    try:
+        result = await explore_ancient_trial(event.get_user_id())
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await ancient_trial_cmd.finish("你还未入道，发送“入道”开始。")
+        if reason == "ancient_trial_locked":
+            await ancient_trial_cmd.finish("古藏试炼需至少二转后方可承受。")
+        if reason == "not_enough_stamina":
+            await ancient_trial_cmd.finish("体力不足，先休整后再试探古藏。")
+        raise
+
+    lines = [
+        f"{result.trial_name}: {result.message}",
+        f"roll={result.roll_value} / 试炼把握约 {result.chance_percent}%",
+    ]
+    if result.success:
+        lines.append(
+            f"灵石 +{result.reward_spirit_stones} | 修为 +{result.reward_cultivation} | 道悟 +{result.reward_insight}"
+        )
+        if result.reward_item_name:
+            lines.append(f"额外获得 {result.reward_item_name} x1。")
+    else:
+        lines.append(f"修为 {result.reward_cultivation}。")
+    await ancient_trial_cmd.finish("\n".join(lines))
 
 
 @duel_cmd.handle()
