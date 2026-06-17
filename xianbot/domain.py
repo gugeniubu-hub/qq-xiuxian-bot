@@ -5,6 +5,17 @@ from enum import StrEnum
 from typing import Optional
 
 
+class Affinity(StrEnum):
+    METAL = "金"
+    WOOD = "木"
+    WATER = "水"
+    FIRE = "火"
+    EARTH = "土"
+    WIND = "风"
+    THUNDER = "雷"
+    VOID = "虚"
+
+
 class RootType(StrEnum):
     MORTAL = "凡灵根"
     YELLOW = "黄灵根"
@@ -44,6 +55,55 @@ class RebirthUnlock(StrEnum):
     HIGHER_ROOT_FLOOR = "高阶灵根保底"
 
 
+class RootTemperament(StrEnum):
+    BALANCED = "中正"
+    FIERCE = "刚猛"
+    TRANQUIL = "沉静"
+    NIMBLE = "灵动"
+    ENLIGHTENED = "空明"
+
+
+class RootTrait(StrEnum):
+    GATHERING = "聚灵"
+    FLOWING = "通脉"
+    INSIGHTFUL = "明悟"
+    EVERGREEN = "长生"
+    WANDERING = "游历"
+    EMBER = "轮回余烬"
+
+
+class MethodGrade(StrEnum):
+    COMMON = "凡品"
+    YELLOW = "黄阶"
+    MYSTIC = "玄阶"
+    EARTH = "地阶"
+    HEAVEN = "天阶"
+    ANCIENT = "古传"
+
+
+class MethodType(StrEnum):
+    BREATH = "吐纳法"
+    MIND = "心法"
+    BODY = "锻体法"
+    BATTLE = "战诀"
+    REBIRTH = "轮回经"
+
+
+class MethodStyle(StrEnum):
+    STEADY = "绵长"
+    SURGING = "霸烈"
+    INSIGHT = "明悟"
+    UNFETTERED = "灵动"
+    REBIRTH = "轮回"
+
+
+class MeditationMode(StrEnum):
+    BREATH = "吐纳"
+    CONDENSE = "凝练"
+    INSIGHT = "参玄"
+    BREAKTHROUGH = "冲关"
+
+
 @dataclass(slots=True)
 class CultivationMethod:
     id: str
@@ -51,8 +111,14 @@ class CultivationMethod:
     realm_requirement: Realm
     practice_bonus: float
     breakthrough_bonus: float
+    insight_bonus: float = 0.0
+    grade: MethodGrade = MethodGrade.COMMON
+    method_type: MethodType = MethodType.MIND
+    affinity: Affinity = Affinity.EARTH
+    style: MethodStyle = MethodStyle.STEADY
     source_sect_id: Optional[str] = None
     required_rebirth_count: int = 0
+    description: str = ""
 
 
 @dataclass(slots=True)
@@ -70,6 +136,10 @@ class Player:
     user_id: str
     nickname: str
     root_type: RootType
+    root_affinity: Affinity = Affinity.WOOD
+    root_purity: int = 60
+    root_temperament: RootTemperament = RootTemperament.BALANCED
+    root_trait: RootTrait = RootTrait.GATHERING
     realm: Realm = Realm.QI_1
     cultivation: int = 0
     age: int = 16
@@ -79,14 +149,20 @@ class Player:
     fortune: int = 0
     stamina: int = 100
     comprehension: int = 10
+    insight: int = 0
+    breakthrough_ready: int = 0
     rebirth_count: int = 0
     soul_marks: int = 0
     legacy_points: int = 0
     sect_id: Optional[str] = None
+    primary_method_id: Optional[str] = None
     meditation_started_at: Optional[str] = None
     meditation_until: Optional[str] = None
     meditation_minutes: int = 0
     meditation_reward: int = 0
     meditation_method_id: Optional[str] = None
+    meditation_mode: Optional[MeditationMode] = None
+    meditation_insight_reward: int = 0
+    meditation_breakthrough_reward: int = 0
     method_ids: list[str] = field(default_factory=list)
     inventory: dict[str, int] = field(default_factory=dict)

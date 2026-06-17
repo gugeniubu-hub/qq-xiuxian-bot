@@ -7,7 +7,7 @@ from typing import Any
 import aiosqlite
 
 from xianbot.database import resolve_sqlite_path
-from xianbot.domain import Player, Realm, RootType
+from xianbot.domain import Affinity, MeditationMode, Player, Realm, RootTemperament, RootTrait, RootType
 
 
 class GameRepository:
@@ -81,11 +81,13 @@ class GameRepository:
                 db,
                 """
                 SELECT
-                  user_id, nickname, root_type, realm, cultivation, age, age_progress, lifespan,
-                  spirit_stones, fortune, stamina, comprehension, rebirth_count,
-                  soul_marks, legacy_points, sect_id, meditation_started_at,
-                  meditation_until, meditation_minutes, meditation_reward,
-                  meditation_method_id
+                  user_id, nickname, root_type, root_affinity, root_purity, root_temperament,
+                  root_trait, realm, cultivation, age, age_progress, lifespan,
+                  spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
+                  rebirth_count, soul_marks, legacy_points, sect_id, primary_method_id,
+                  meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
+                  meditation_method_id, meditation_mode, meditation_insight_reward,
+                  meditation_breakthrough_reward
                 FROM players
                 WHERE user_id = ?
                 """,
@@ -100,6 +102,10 @@ class GameRepository:
             user_id=row["user_id"],
             nickname=row["nickname"],
             root_type=RootType(row["root_type"]),
+            root_affinity=Affinity(row["root_affinity"]),
+            root_purity=int(row["root_purity"]),
+            root_temperament=RootTemperament(row["root_temperament"]),
+            root_trait=RootTrait(row["root_trait"]),
             realm=Realm(row["realm"]),
             cultivation=int(row["cultivation"]),
             age=int(row["age"]),
@@ -109,15 +115,23 @@ class GameRepository:
             fortune=int(row["fortune"]),
             stamina=int(row["stamina"]),
             comprehension=int(row["comprehension"]),
+            insight=int(row["insight"]),
+            breakthrough_ready=int(row["breakthrough_ready"]),
             rebirth_count=int(row["rebirth_count"]),
             soul_marks=int(row["soul_marks"]),
             legacy_points=int(row["legacy_points"]),
             sect_id=row["sect_id"],
+            primary_method_id=row["primary_method_id"],
             meditation_started_at=row["meditation_started_at"],
             meditation_until=row["meditation_until"],
             meditation_minutes=int(row["meditation_minutes"]),
             meditation_reward=int(row["meditation_reward"]),
             meditation_method_id=row["meditation_method_id"],
+            meditation_mode=None
+            if row["meditation_mode"] is None
+            else MeditationMode(row["meditation_mode"]),
+            meditation_insight_reward=int(row["meditation_insight_reward"]),
+            meditation_breakthrough_reward=int(row["meditation_breakthrough_reward"]),
             method_ids=method_ids,
             inventory=inventory,
         )
@@ -127,17 +141,23 @@ class GameRepository:
             await db.execute(
                 """
                 INSERT INTO players (
-                  user_id, nickname, root_type, realm, cultivation, age, age_progress, lifespan,
-                  spirit_stones, fortune, stamina, comprehension, rebirth_count,
-                  soul_marks, legacy_points, sect_id, meditation_started_at,
-                  meditation_until, meditation_minutes, meditation_reward,
-                  meditation_method_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  user_id, nickname, root_type, root_affinity, root_purity, root_temperament,
+                  root_trait, realm, cultivation, age, age_progress, lifespan,
+                  spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
+                  rebirth_count, soul_marks, legacy_points, sect_id, primary_method_id,
+                  meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
+                  meditation_method_id, meditation_mode, meditation_insight_reward,
+                  meditation_breakthrough_reward
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     player.user_id,
                     player.nickname,
                     player.root_type.value,
+                    player.root_affinity.value,
+                    player.root_purity,
+                    player.root_temperament.value,
+                    player.root_trait.value,
                     player.realm.value,
                     player.cultivation,
                     player.age,
@@ -147,15 +167,21 @@ class GameRepository:
                     player.fortune,
                     player.stamina,
                     player.comprehension,
+                    player.insight,
+                    player.breakthrough_ready,
                     player.rebirth_count,
                     player.soul_marks,
                     player.legacy_points,
                     player.sect_id,
+                    player.primary_method_id,
                     player.meditation_started_at,
                     player.meditation_until,
                     player.meditation_minutes,
                     player.meditation_reward,
                     player.meditation_method_id,
+                    None if player.meditation_mode is None else player.meditation_mode.value,
+                    player.meditation_insight_reward,
+                    player.meditation_breakthrough_reward,
                 ),
             )
             await db.commit()
@@ -169,12 +195,19 @@ class GameRepository:
         cultivation_delta: int = 0,
         fortune_delta: int = 0,
         stamina_delta: int = 0,
+        insight_delta: int = 0,
+        breakthrough_ready_delta: int = 0,
         legacy_points_delta: int = 0,
         rebirth_count_delta: int = 0,
         soul_marks_delta: int = 0,
         lifespan_delta: int = 0,
         realm: Realm | None = None,
         root_type: RootType | None = None,
+        root_affinity: Affinity | None = None,
+        root_purity: int | None = None,
+        root_temperament: RootTemperament | None = None,
+        root_trait: RootTrait | None = None,
+        primary_method_id: str | None | object = None,
         sect_id: str | None | object = None,
     ) -> None:
         updates: list[str] = []
@@ -192,6 +225,12 @@ class GameRepository:
         if stamina_delta:
             updates.append("stamina = MIN(MAX(stamina + ?, 0), 100)")
             params.append(stamina_delta)
+        if insight_delta:
+            updates.append("insight = MAX(insight + ?, 0)")
+            params.append(insight_delta)
+        if breakthrough_ready_delta:
+            updates.append("breakthrough_ready = MIN(MAX(breakthrough_ready + ?, 0), 100)")
+            params.append(breakthrough_ready_delta)
         if legacy_points_delta:
             updates.append("legacy_points = MAX(legacy_points + ?, 0)")
             params.append(legacy_points_delta)
@@ -210,6 +249,21 @@ class GameRepository:
         if root_type is not None:
             updates.append("root_type = ?")
             params.append(root_type.value)
+        if root_affinity is not None:
+            updates.append("root_affinity = ?")
+            params.append(root_affinity.value)
+        if root_purity is not None:
+            updates.append("root_purity = ?")
+            params.append(root_purity)
+        if root_temperament is not None:
+            updates.append("root_temperament = ?")
+            params.append(root_temperament.value)
+        if root_trait is not None:
+            updates.append("root_trait = ?")
+            params.append(root_trait.value)
+        if primary_method_id is not None:
+            updates.append("primary_method_id = ?")
+            params.append(primary_method_id)
         if sect_id is not None:
             updates.append("sect_id = ?")
             params.append(sect_id)
@@ -278,13 +332,27 @@ class GameRepository:
                   age = 16,
                   age_progress = 0,
                   stamina = 100,
+                  insight = 0,
+                  breakthrough_ready = 0,
                   sect_id = NULL,
+                  primary_method_id = NULL,
                   meditation_started_at = NULL,
                   meditation_until = NULL,
                   meditation_minutes = 0,
                   meditation_reward = 0,
                   meditation_method_id = NULL,
+                  meditation_mode = NULL,
+                  meditation_insight_reward = 0,
+                  meditation_breakthrough_reward = 0,
                   updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            )
+            await db.execute(
+                """
+                UPDATE player_methods
+                SET equipped = 0
                 WHERE user_id = ?
                 """,
                 (user_id,),
@@ -300,6 +368,9 @@ class GameRepository:
         minutes: int,
         reward: int,
         method_id: str | None,
+        mode: MeditationMode,
+        insight_reward: int,
+        breakthrough_reward: int,
     ) -> None:
         async with self._connect() as db:
             await db.execute(
@@ -311,10 +382,23 @@ class GameRepository:
                   meditation_minutes = ?,
                   meditation_reward = ?,
                   meditation_method_id = ?,
+                  meditation_mode = ?,
+                  meditation_insight_reward = ?,
+                  meditation_breakthrough_reward = ?,
                   updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = ?
                 """,
-                (started_at, until, minutes, reward, method_id, user_id),
+                (
+                    started_at,
+                    until,
+                    minutes,
+                    reward,
+                    method_id,
+                    mode.value,
+                    insight_reward,
+                    breakthrough_reward,
+                    user_id,
+                ),
             )
             await db.commit()
 
@@ -329,6 +413,9 @@ class GameRepository:
                   meditation_minutes = 0,
                   meditation_reward = 0,
                   meditation_method_id = NULL,
+                  meditation_mode = NULL,
+                  meditation_insight_reward = 0,
+                  meditation_breakthrough_reward = 0,
                   updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = ?
                 """,
@@ -447,15 +534,22 @@ class GameRepository:
                   cm.id,
                   cm.name,
                   cm.realm_requirement,
+                  cm.grade,
+                  cm.method_type,
+                  cm.affinity,
+                  cm.style,
                   cm.practice_bonus,
                   cm.breakthrough_bonus,
+                  cm.insight_bonus,
                   pm.mastery,
+                  pm.equipped,
                   cm.source_sect_id,
-                  cm.required_rebirth_count
+                  cm.required_rebirth_count,
+                  cm.description
                 FROM cultivation_methods cm
                 INNER JOIN player_methods pm ON pm.method_id = cm.id
                 WHERE pm.user_id = ?
-                ORDER BY pm.mastery DESC, pm.acquired_at
+                ORDER BY pm.equipped DESC, pm.mastery DESC, pm.acquired_at
                 """,
                 (user_id,),
         )
@@ -474,11 +568,18 @@ class GameRepository:
                   cm.id,
                   cm.name,
                   cm.realm_requirement,
+                  cm.grade,
+                  cm.method_type,
+                  cm.affinity,
+                  cm.style,
                   cm.practice_bonus,
                   cm.breakthrough_bonus,
+                  cm.insight_bonus,
                   pm.mastery,
+                  pm.equipped,
                   cm.source_sect_id,
-                  cm.required_rebirth_count
+                  cm.required_rebirth_count,
+                  cm.description
                 FROM cultivation_methods cm
                 INNER JOIN player_methods pm ON pm.method_id = cm.id
                 WHERE pm.user_id = ? AND cm.name = ?
@@ -497,8 +598,9 @@ class GameRepository:
                 db,
                 """
                 SELECT
-                  id, name, realm_requirement, practice_bonus,
-                  breakthrough_bonus, source_sect_id, required_rebirth_count
+                  id, name, realm_requirement, grade, method_type, affinity, style,
+                  practice_bonus, breakthrough_bonus, insight_bonus,
+                  source_sect_id, required_rebirth_count, description
                 FROM cultivation_methods
                 WHERE source_sect_id = ? AND required_rebirth_count <= ?
                 ORDER BY required_rebirth_count, realm_requirement
@@ -511,8 +613,8 @@ class GameRepository:
         async with self._connect() as db:
             cursor = await db.execute(
                 """
-                INSERT OR IGNORE INTO player_methods (user_id, method_id, mastery)
-                VALUES (?, ?, 0)
+                INSERT OR IGNORE INTO player_methods (user_id, method_id, mastery, equipped)
+                VALUES (?, ?, 0, 0)
                 """,
                 (user_id, method_id),
             )
@@ -530,6 +632,26 @@ class GameRepository:
                 WHERE user_id = ? AND method_id = ?
                 """,
                 (amount, user_id, method_id),
+            )
+            await db.commit()
+
+    async def set_primary_method(self, user_id: str, method_id: str) -> None:
+        async with self._connect() as db:
+            await db.execute(
+                """
+                UPDATE player_methods
+                SET equipped = CASE WHEN method_id = ? THEN 1 ELSE 0 END
+                WHERE user_id = ?
+                """,
+                (method_id, user_id),
+            )
+            await db.execute(
+                """
+                UPDATE players
+                SET primary_method_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                """,
+                (method_id, user_id),
             )
             await db.commit()
 

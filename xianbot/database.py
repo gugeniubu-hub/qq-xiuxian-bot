@@ -10,6 +10,10 @@ CREATE TABLE IF NOT EXISTS players (
   user_id TEXT PRIMARY KEY,
   nickname TEXT NOT NULL,
   root_type TEXT NOT NULL,
+  root_affinity TEXT NOT NULL DEFAULT '木',
+  root_purity INTEGER NOT NULL DEFAULT 60,
+  root_temperament TEXT NOT NULL DEFAULT '中正',
+  root_trait TEXT NOT NULL DEFAULT '聚灵',
   realm TEXT NOT NULL,
   cultivation INTEGER NOT NULL DEFAULT 0,
   age INTEGER NOT NULL DEFAULT 16,
@@ -19,15 +23,21 @@ CREATE TABLE IF NOT EXISTS players (
   fortune INTEGER NOT NULL DEFAULT 0,
   stamina INTEGER NOT NULL DEFAULT 100,
   comprehension INTEGER NOT NULL DEFAULT 10,
+  insight INTEGER NOT NULL DEFAULT 0,
+  breakthrough_ready INTEGER NOT NULL DEFAULT 0,
   rebirth_count INTEGER NOT NULL DEFAULT 0,
   soul_marks INTEGER NOT NULL DEFAULT 0,
   legacy_points INTEGER NOT NULL DEFAULT 0,
   sect_id TEXT,
+  primary_method_id TEXT,
   meditation_started_at TEXT,
   meditation_until TEXT,
   meditation_minutes INTEGER NOT NULL DEFAULT 0,
   meditation_reward INTEGER NOT NULL DEFAULT 0,
   meditation_method_id TEXT,
+  meditation_mode TEXT,
+  meditation_insight_reward INTEGER NOT NULL DEFAULT 0,
+  meditation_breakthrough_reward INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -44,10 +54,16 @@ CREATE TABLE IF NOT EXISTS cultivation_methods (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   realm_requirement TEXT NOT NULL,
+  grade TEXT NOT NULL DEFAULT '凡品',
+  method_type TEXT NOT NULL DEFAULT '心法',
+  affinity TEXT NOT NULL DEFAULT '土',
+  style TEXT NOT NULL DEFAULT '绵长',
   practice_bonus REAL NOT NULL DEFAULT 0,
   breakthrough_bonus REAL NOT NULL DEFAULT 0,
+  insight_bonus REAL NOT NULL DEFAULT 0,
   source_sect_id TEXT,
   required_rebirth_count INTEGER NOT NULL DEFAULT 0,
+  description TEXT NOT NULL DEFAULT '',
   FOREIGN KEY (source_sect_id) REFERENCES sects(id)
 );
 
@@ -55,6 +71,7 @@ CREATE TABLE IF NOT EXISTS player_methods (
   user_id TEXT NOT NULL,
   method_id TEXT NOT NULL,
   mastery INTEGER NOT NULL DEFAULT 0,
+  equipped INTEGER NOT NULL DEFAULT 0,
   acquired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, method_id),
   FOREIGN KEY (user_id) REFERENCES players(user_id),
@@ -183,10 +200,126 @@ DEFAULT_SECTS = (
 )
 
 DEFAULT_METHODS = (
-    ("breath-basic", "吐纳诀", "炼气前期", 0.10, 0.00, "qinglan", 0),
-    ("mist-heart", "青岚养心篇", "筑基前期", 0.15, 0.05, "qinglan", 0),
-    ("scarlet-soul", "赤霄战诀", "炼气后期", 0.08, 0.10, "chixiao", 0),
-    ("void-scripture", "太虚轮回经", "筑基圆满", 0.18, 0.08, "taixu", 1),
+    (
+        "breath-basic",
+        "吐纳诀",
+        "炼气前期",
+        "凡品",
+        "吐纳法",
+        "木",
+        "绵长",
+        0.10,
+        0.00,
+        0.03,
+        "qinglan",
+        0,
+        "青岚宗入门吐纳法，胜在平稳，利于新手固本培元。",
+    ),
+    (
+        "mist-heart",
+        "青岚养心篇",
+        "筑基前期",
+        "黄阶",
+        "心法",
+        "水",
+        "明悟",
+        0.15,
+        0.05,
+        0.08,
+        "qinglan",
+        0,
+        "以养神静心见长，可让修士在闭关时更易凝成道感。",
+    ),
+    (
+        "river-mirror",
+        "镜水归元录",
+        "金丹前期",
+        "玄阶",
+        "心法",
+        "水",
+        "明悟",
+        0.19,
+        0.06,
+        0.12,
+        "qinglan",
+        0,
+        "青岚宗内门传承，修至深处可令气海如镜，最适合参玄与稳固根基。",
+    ),
+    (
+        "scarlet-soul",
+        "赤霄战诀",
+        "炼气后期",
+        "黄阶",
+        "战诀",
+        "火",
+        "霸烈",
+        0.08,
+        0.10,
+        0.02,
+        "chixiao",
+        0,
+        "赤霄门杀伐传承，冲关与历练收益凶猛，但也更看根骨。",
+    ),
+    (
+        "flame-body",
+        "离火锻骨篇",
+        "筑基中期",
+        "玄阶",
+        "锻体法",
+        "火",
+        "霸烈",
+        0.14,
+        0.11,
+        0.03,
+        "chixiao",
+        0,
+        "以火炼躯，斗法与冲关均有奇效，但闭关时更耗心神。",
+    ),
+    (
+        "void-scripture",
+        "太虚轮回经",
+        "筑基圆满",
+        "地阶",
+        "轮回经",
+        "虚",
+        "轮回",
+        0.18,
+        0.08,
+        0.10,
+        "taixu",
+        1,
+        "轮回者才可驾驭的古经，擅长积蓄前尘感悟与冲关底蕴。",
+    ),
+    (
+        "return-light",
+        "返照观心诀",
+        "金丹后期",
+        "地阶",
+        "心法",
+        "虚",
+        "轮回",
+        0.20,
+        0.10,
+        0.15,
+        "taixu",
+        1,
+        "返照前尘，化执为悟，轮回次数越高时越显神异。",
+    ),
+    (
+        "ancient-vault",
+        "太虚古藏篇",
+        "元婴中期",
+        "古传",
+        "轮回经",
+        "雷",
+        "轮回",
+        0.24,
+        0.14,
+        0.16,
+        "taixu",
+        2,
+        "藏有古修封印的残篇，需要多次转世者才能真正承受其反震。",
+    ),
 )
 
 DEFAULT_ITEMS = (
@@ -231,9 +364,10 @@ def initialize_database(database_url: str) -> Path:
         connection.executemany(
             """
             INSERT OR IGNORE INTO cultivation_methods (
-              id, name, realm_requirement, practice_bonus, breakthrough_bonus,
-              source_sect_id, required_rebirth_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+              id, name, realm_requirement, grade, method_type, affinity, style,
+              practice_bonus, breakthrough_bonus, insight_bonus,
+              source_sect_id, required_rebirth_count, description
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             DEFAULT_METHODS,
         )
@@ -264,4 +398,52 @@ def _ensure_schema_compatibility(connection: sqlite3.Connection) -> None:
     if "mastery" not in player_method_columns:
         connection.execute(
             "ALTER TABLE player_methods ADD COLUMN mastery INTEGER NOT NULL DEFAULT 0"
+        )
+    if "equipped" not in player_method_columns:
+        connection.execute(
+            "ALTER TABLE player_methods ADD COLUMN equipped INTEGER NOT NULL DEFAULT 0"
+        )
+
+    player_column_defaults = {
+        "root_affinity": "木",
+        "root_purity": 60,
+        "root_temperament": "中正",
+        "root_trait": "聚灵",
+        "insight": 0,
+        "breakthrough_ready": 0,
+        "primary_method_id": None,
+        "meditation_mode": None,
+        "meditation_insight_reward": 0,
+        "meditation_breakthrough_reward": 0,
+    }
+    for column, default_value in player_column_defaults.items():
+        if column in player_columns:
+            continue
+        if default_value is None:
+            connection.execute(f"ALTER TABLE players ADD COLUMN {column} TEXT")
+        elif isinstance(default_value, str):
+            connection.execute(
+                f"ALTER TABLE players ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default_value}'"
+            )
+        else:
+            connection.execute(
+                f"ALTER TABLE players ADD COLUMN {column} INTEGER NOT NULL DEFAULT {default_value}"
+            )
+
+    method_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(cultivation_methods)").fetchall()
+    }
+    method_column_defaults = {
+        "grade": ("TEXT", "'凡品'"),
+        "method_type": ("TEXT", "'心法'"),
+        "affinity": ("TEXT", "'土'"),
+        "style": ("TEXT", "'绵长'"),
+        "insight_bonus": ("REAL", "0"),
+        "description": ("TEXT", "''"),
+    }
+    for column, (column_type, default_sql) in method_column_defaults.items():
+        if column in method_columns:
+            continue
+        connection.execute(
+            f"ALTER TABLE cultivation_methods ADD COLUMN {column} {column_type} NOT NULL DEFAULT {default_sql}"
         )

@@ -31,6 +31,7 @@ from xianbot.services import (
     list_market,
     list_sects_for_player,
     rebirth,
+    set_primary_method,
     sign_in,
     start_meditation,
 )
@@ -50,6 +51,7 @@ sect_list_cmd = on_command("宗门列表")
 rebirth_cmd = on_command("转世", aliases={"轮回"})
 join_sect_cmd = on_command("加入宗门")
 methods_cmd = on_command("我的功法", aliases={"宗门传承"})
+primary_method_cmd = on_command("主修功法", aliases={"切换主修"})
 inventory_cmd = on_command("背包")
 adventure_cmd = on_command("历练")
 encounter_cmd = on_command("奇遇")
@@ -68,6 +70,10 @@ world_cmd = on_command("天象", aliases={"今日天象", "世界状态"})
 @driver.on_startup
 async def startup() -> None:
     initialize_database(settings.database_url)
+
+
+def _meditation_usage() -> str:
+    return "闭关 [分钟] [吐纳|凝练|参玄|冲关]，例如：闭关 45 参玄"
 
 
 @help_cmd.handle()
@@ -111,33 +117,39 @@ async def handle_enter_path(event: MessageEvent) -> None:
     player, created = await create_player_if_missing(user_id, event.sender.nickname or user_id)
     if created:
         await enter_path_cmd.finish(
-            f"道友入道成功，灵根为{player.root_type.value}。"
-            f"初始灵石 {player.spirit_stones}，福缘 {player.fortune}。"
-            "发送“我的状态”查看详情。"
+            f"道友入道成功，灵根为{player.root_type.value}，主属性 {player.root_affinity.value}，纯度 {player.root_purity}。"
+            f"性情 {player.root_temperament.value}，特质 {player.root_trait.value}。"
+            f"初始灵石 {player.spirit_stones}，福缘 {player.fortune}。发送“我的状态”查看详情。"
         )
     await enter_path_cmd.finish(
-        f"道友早已踏上仙途，当前境界 {player.realm.value}，灵根 {player.root_type.value}。"
+        f"道友早已踏上仙途，当前境界 {player.realm.value}，灵根 {player.root_type.value}·{player.root_affinity.value}。"
     )
 
 
 @status_cmd.handle()
 async def handle_status(event: MessageEvent) -> None:
-    player = await get_player_status(event.get_user_id())
+    user_id = event.get_user_id()
+    player = await get_player_status(user_id)
     if player is None:
         await status_cmd.finish("你还未入道，发送“入道”开始。")
+    methods = await get_player_methods(user_id)
+    primary_method = next((method for method in methods if bool(method.get("equipped"))), None)
+    method_summary = "未定主修" if primary_method is None else (
+        f"{primary_method['name']} [{primary_method['mastery_title']}]"
+    )
     await status_cmd.finish(
         "\n".join(
             [
                 f"道号: {player.nickname}",
-                f"灵根: {player.root_type.value}",
+                f"灵根: {player.root_type.value}·{player.root_affinity.value}系 | 纯度 {player.root_purity}",
+                f"根性: {player.root_temperament.value} | 特质: {player.root_trait.value}",
                 f"境界: {player.realm.value}",
                 f"修为: {player.cultivation}",
-                f"灵石: {player.spirit_stones}",
-                f"福缘: {player.fortune}",
-                f"悟性: {player.comprehension}",
+                f"悟性: {player.comprehension} | 道悟: {player.insight} | 冲关底蕴: {player.breakthrough_ready}",
+                f"主修: {method_summary}",
+                f"灵石: {player.spirit_stones} | 福缘: {player.fortune} | 体力: {player.stamina}",
                 f"寿元: {player.age}/{player.lifespan}",
-                f"轮回: {player.rebirth_count} 转",
-                f"前尘点: {player.legacy_points}",
+                f"轮回: {player.rebirth_count} 转 | 前尘点: {player.legacy_points} | 轮回印记: {player.soul_marks}",
             ]
         )
     )
@@ -159,8 +171,7 @@ async def handle_sign_in(event: MessageEvent) -> None:
 
     extra = "今日鸿运加身。" if result.fortune_roll >= 96 else "气运平稳。"
     await sign_in_cmd.finish(
-        f"[{result.world_title}] "
-        f"签到完成，获得灵石 {result.base_reward}，福缘池分红 {result.pool_reward}，"
+        f"[{result.world_title}] 签到完成，获得灵石 {result.base_reward}，福缘池分红 {result.pool_reward}，"
         f"修为提升后总计 {result.total_cultivation}。{extra}"
     )
 
@@ -194,8 +205,9 @@ async def handle_rebirth_action(event: MessageEvent) -> None:
 
     unlocks = "、".join(result.unlocked_features) if result.unlocked_features else "暂无"
     await rebirth_cmd.finish(
-        f"道友已转世重修，前尘点 +{result.legacy_points_gained}，"
-        f"新灵根保底为 {result.new_root_floor}，解锁内容: {unlocks}。"
+        f"道友已转世重修，前尘点 +{result.legacy_points_gained}。"
+        f"新灵根保底为 {result.new_root_floor}，本次根骨：{result.root_brief}。"
+        f"解锁内容: {unlocks}。"
     )
 
 
@@ -233,11 +245,39 @@ async def handle_methods(event: MessageEvent) -> None:
 
     lines = ["你已习得的功法:"]
     for method in methods:
-        mastery = int(method.get("mastery", 0))
+        mark = " [主修]" if bool(method.get("equipped")) else ""
         lines.append(
-            f"- {method['name']} ({method['realm_requirement']}) 修炼+{int(float(method['practice_bonus']) * 100)}% | 熟练 {mastery}"
+            f"- {method['name']}{mark} | {method['grade']} {method['method_type']} {method['affinity']}系"
+        )
+        lines.append(
+            f"  境界需求 {method['realm_requirement']} | 修炼+{int(float(method['practice_total']) * 100)}%"
+            f" | 冲关+{int(method['breakthrough_total'])}% | 悟道+{int(float(method['insight_total']) * 100)}%"
+        )
+        lines.append(
+            f"  熟练 {method['mastery']} [{method['mastery_title']}] | 风格 {method['style']}"
         )
     await methods_cmd.finish("\n".join(lines))
+
+
+@primary_method_cmd.handle()
+async def handle_primary_method(event: MessageEvent, args: Message = CommandArg()) -> None:
+    method_name = args.extract_plain_text().strip()
+    if not method_name:
+        await primary_method_cmd.finish("格式：主修功法 功法名")
+    try:
+        result = await set_primary_method(event.get_user_id(), method_name)
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await primary_method_cmd.finish("你还未入道，发送“入道”开始。")
+        if reason == "method_not_found":
+            await primary_method_cmd.finish("未找到这门功法，先发送“我的功法”查看。")
+        raise
+    await primary_method_cmd.finish(
+        f"已将《{result.method_name}》设为主修。"
+        f"当前层次 {result.mastery_title}，修炼+{result.practice_bonus_percent}% ，"
+        f"冲关+{result.breakthrough_bonus_percent}% ，悟道+{result.insight_bonus_percent}% 。"
+    )
 
 
 @inventory_cmd.handle()
@@ -270,9 +310,16 @@ async def handle_adventure(event: MessageEvent) -> None:
     reward_line = (
         f"灵石 {result.spirit_stones_delta:+}，修为 {result.cultivation_delta:+}，体力 {result.stamina_delta}。"
     )
+    if result.insight_delta:
+        reward_line += f" 道悟 {result.insight_delta:+}。"
     if result.reward_item_name:
         reward_line += f" 额外获得 {result.reward_item_name}。"
-    await adventure_cmd.finish(f"{result.message}\nroll={result.roll_value}\n{reward_line}")
+    lines = [f"[{result.world_title}] {result.message}", f"roll={result.roll_value}", reward_line]
+    if result.mastery_method_name and result.mastery_gain:
+        lines.append(f"《{result.mastery_method_name}》熟练 +{result.mastery_gain}。")
+    if result.lifespan_notice:
+        lines.append(result.lifespan_notice)
+    await adventure_cmd.finish("\n".join(lines))
 
 
 @encounter_cmd.handle()
@@ -292,6 +339,8 @@ async def handle_encounter(event: MessageEvent) -> None:
         f"roll={result.roll_value}",
         f"灵石 {result.spirit_stones_delta:+}，修为 {result.cultivation_delta:+}，体力 {result.stamina_delta}，福缘 {result.fortune_delta:+}。",
     ]
+    if result.insight_delta:
+        lines.append(f"道悟 {result.insight_delta:+}。")
     if result.reward_item_name:
         lines.append(f"额外获得 {result.reward_item_name}。")
     if result.mastery_method_name and result.mastery_gain:
@@ -311,17 +360,23 @@ async def handle_breakthrough(event: MessageEvent) -> None:
             await breakthrough_cmd.finish("你还未入道，发送“入道”开始。")
         if reason == "not_enough_cultivation":
             await breakthrough_cmd.finish("修为尚不足以冲关。")
+        if reason == "not_enough_preparation":
+            await breakthrough_cmd.finish("冲关底蕴不足。先用“闭关 冲关”或“闭关 凝练”积蓄，再来突破。")
         if reason == "realm_maxed":
             await breakthrough_cmd.finish("当前已至此世尽头，后续以转世为主。")
         raise
 
     lines = [f"[{result.world_title}] roll={result.roll_value} / 成功率约 {result.chance_percent}%"]
+    if result.preparation_cost:
+        lines.append(f"本次消耗冲关底蕴 {result.preparation_cost}。")
     if result.soul_mark_gained:
         lines.append("你在天地压迫中凝成了一枚轮回印记。")
     elif result.success:
         lines.append(f"突破成功！ {result.current_realm} -> {result.next_realm}")
     else:
         lines.append(f"突破失败，修为变动 {result.cultivation_delta}。")
+    if result.unlocked_methods:
+        lines.append(f"宗门传承感应而至：{'、'.join(result.unlocked_methods)}。")
     if result.lifespan_notice:
         lines.append(result.lifespan_notice)
     await breakthrough_cmd.finish("\n".join(lines))
@@ -329,14 +384,22 @@ async def handle_breakthrough(event: MessageEvent) -> None:
 
 @meditate_cmd.handle()
 async def handle_meditation(event: MessageEvent, args: Message = CommandArg()) -> None:
-    minutes_text = args.extract_plain_text().strip()
+    parts = args.extract_plain_text().strip().split()
     minutes = None
-    if minutes_text:
-        if not minutes_text.isdigit():
-            await meditate_cmd.finish("请输入闭关分钟数，例如：闭关 30")
-        minutes = int(minutes_text)
+    mode = None
+    if parts:
+        if parts[0].isdigit():
+            minutes = int(parts[0])
+            if len(parts) >= 2:
+                mode = parts[1]
+        else:
+            mode = parts[0]
+            if len(parts) >= 2 and parts[1].isdigit():
+                minutes = int(parts[1])
+            elif len(parts) >= 2:
+                await meditate_cmd.finish(_meditation_usage())
     try:
-        result = await start_meditation(event.get_user_id(), minutes)
+        result = await start_meditation(event.get_user_id(), minutes, mode)
     except GameError as exc:
         reason = str(exc)
         if reason == "player_not_found":
@@ -345,12 +408,17 @@ async def handle_meditation(event: MessageEvent, args: Message = CommandArg()) -
             await meditate_cmd.finish("你已在闭关中，发送“出关”查看。")
         if reason == "invalid_meditation_minutes":
             await meditate_cmd.finish("闭关时长需在 10 到 180 分钟之间。")
+        if reason == "invalid_meditation_mode":
+            await meditate_cmd.finish(_meditation_usage())
         raise
 
-    await meditate_cmd.finish(
-        f"[{result.world_title}] 你已开始闭关 {result.minutes} 分钟，预计至 {result.until} 出关，可获修为 {result.reward}。"
-        + (f" 主修功法：《{result.method_name}》。 " if result.method_name else "")
-    )
+    lines = [
+        f"[{result.world_title}] 你已开始{result.mode_name}闭关 {result.minutes} 分钟，预计至 {result.until} 出关。",
+        f"本次可获修为 {result.reward}，道悟 {result.insight_reward}，冲关底蕴 {result.breakthrough_reward}。",
+    ]
+    if result.method_name:
+        lines.append(f"主修功法：《{result.method_name}》。")
+    await meditate_cmd.finish("\n".join(lines))
 
 
 @leave_meditation_cmd.handle()
@@ -367,9 +435,13 @@ async def handle_leave_meditation(event: MessageEvent) -> None:
 
     if result.still_waiting:
         await leave_meditation_cmd.finish(
-            f"闭关尚未结束，还需约 {result.remaining_minutes} 分钟，可得修为 {result.reward}。"
+            f"{result.mode_name or '闭关'}尚未结束，还需约 {result.remaining_minutes} 分钟，可得修为 {result.reward}。"
         )
-    lines = [f"你已出关，本次闭关 {result.minutes} 分钟，获得修为 {result.reward}。"]
+    lines = [f"你已出关，本次{result.mode_name or '闭关'} {result.minutes} 分钟，获得修为 {result.reward}。"]
+    if result.insight_gain:
+        lines.append(f"道悟 +{result.insight_gain}。")
+    if result.breakthrough_ready_gain:
+        lines.append(f"冲关底蕴 +{result.breakthrough_ready_gain}。")
     if result.method_name and result.mastery_gain:
         lines.append(f"《{result.method_name}》熟练 +{result.mastery_gain}。")
     if result.lifespan_notice:
@@ -421,10 +493,15 @@ async def handle_insight(event: MessageEvent, args: Message = CommandArg()) -> N
             await insight_cmd.finish("缺少吐纳残篇，先去历练或奇遇搜集。")
         raise
 
-    await insight_cmd.finish(
-        f"[{result.world_title}] 你借残篇参悟《{result.method_name}》，"
-        f"熟练 +{result.mastery_gain}，当前熟练 {result.new_mastery}，修为 +{result.cultivation_gain}。"
-    )
+    lines = [
+        f"[{result.world_title}] 你借残篇参悟《{result.method_name}》，熟练 +{result.mastery_gain}，"
+        f"当前熟练 {result.new_mastery}，修为 +{result.cultivation_gain}。"
+    ]
+    if result.insight_gain:
+        lines.append(f"道悟 +{result.insight_gain}。")
+    if result.breakthrough_ready_gain:
+        lines.append(f"冲关底蕴 +{result.breakthrough_ready_gain}。")
+    await insight_cmd.finish("\n".join(lines))
 
 
 @market_list_cmd.handle()
