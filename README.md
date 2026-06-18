@@ -88,6 +88,24 @@ ONEBOT_ACCESS_TOKEN=
 ONEBOT_SECRET=
 ```
 
+### 常用短指令
+
+`COMMAND_START=["","/"]` 时，中文指令和斜杠短指令都能用。常用例子:
+
+```text
+/help    帮助
+/start   新手引导
+/me      我的状态
+/daily   签到
+/bag     背包
+/market  坊市
+/rank    排行
+/pk @目标 斗法
+/world   天象
+/event   世界事件
+/claim   领取事件
+```
+
 ## 技术方案
 
 - Python 3.11+

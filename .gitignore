@@ -3,7 +3,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.pyc
+*.pyo
+*.egg-info/
 .env
+.env.*
 data/
-work/refs/
+work/
 outputs/
