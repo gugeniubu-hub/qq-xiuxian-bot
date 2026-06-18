@@ -649,11 +649,14 @@ def test_destiny_improves_alchemy_and_duel(tmp_path, monkeypatch) -> None:
 
         sequence = iter([60, 42, 58, 45, 62, 40, 88, 36, 52])
         duel_randint = services.random.randint
+        duel_choice = services.random.choice
         services.random.randint = lambda a, b: next(sequence, 52)
+        services.random.choice = lambda seq: seq[1]
         try:
             baseline_duel = await duel("60002", "60003")
         finally:
             services.random.randint = duel_randint
+            services.random.choice = duel_choice
 
         await repo.update_player_stats(
             "60002",
@@ -673,11 +676,14 @@ def test_destiny_improves_alchemy_and_duel(tmp_path, monkeypatch) -> None:
 
         sequence = iter([60, 42, 58, 45, 62, 40, 88, 36, 52])
         duel_randint = services.random.randint
+        duel_choice = services.random.choice
         services.random.randint = lambda a, b: next(sequence, 52)
+        services.random.choice = lambda seq: seq[1]
         try:
             empowered_duel = await duel("60002", "60003")
         finally:
             services.random.randint = duel_randint
+            services.random.choice = duel_choice
 
         assert baseline_duel.winner_name == "fighter"
         assert empowered_duel.winner_name == "fighter"
@@ -945,6 +951,71 @@ def test_alchemy_and_duel_gameplay(tmp_path, monkeypatch) -> None:
         assert winner.spirit_stones >= 300 + duel_result.winner_spirit_stones_gain
         assert loser.cultivation >= 0
         assert loser.stamina < 100
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_duel_moves_can_trigger_status_effect_logs(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian20.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("91001", "voidwalker")
+        await create_player_if_missing("91002", "flameguard")
+
+        repo = GameRepository(get_settings().database_url)
+        await repo.update_player_stats(
+            "91001",
+            rebirth_count_delta=1,
+            realm=Realm.CORE_1,
+            root_affinity=Affinity.VOID,
+            root_trait=RootTrait.EMBER,
+            cultivation_delta=3200,
+            insight_delta=30,
+            breakthrough_ready_delta=35,
+            fortune_delta=12,
+        )
+        await repo.update_player_stats(
+            "91002",
+            realm=Realm.FOUNDATION_3,
+            root_affinity=Affinity.FIRE,
+            root_trait=RootTrait.EVERGREEN,
+            cultivation_delta=2400,
+            insight_delta=20,
+            breakthrough_ready_delta=24,
+            fortune_delta=8,
+        )
+        await join_sect("91001", "太虚观")
+        await join_sect("91002", "赤霄门")
+        await repo.grant_player_method("91001", "void-scripture")
+        await repo.set_primary_method("91001", "void-scripture")
+        await repo.grant_player_method("91002", "scarlet-soul")
+        await repo.set_primary_method("91002", "scarlet-soul")
+
+        import xianbot.services as services
+
+        original_choice = services.random.choice
+        original_randint = services.random.randint
+
+        def choose_first(seq):
+            return seq[0]
+
+        sequence = iter([66, 48, 70, 44, 82, 40, 88, 35, 60])
+        services.random.choice = choose_first
+        services.random.randint = lambda a, b: next(sequence, 60)
+        try:
+            result = await duel("91001", "91002")
+        finally:
+            services.random.choice = original_choice
+            services.random.randint = original_randint
+
+        text = "\n".join(result.rounds)
+        assert "第1回合" in text
+        assert "触发：" in text
+        assert any(tag in text for tag in ("echo+", "burn+", "regen+", "focus+", "entropy-"))
 
     asyncio.run(scenario())
     get_settings.cache_clear()

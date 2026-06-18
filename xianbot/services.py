@@ -1330,72 +1330,324 @@ def _duel_signature(player: Player, method: dict[str, object] | None) -> tuple[s
             return "回轮", "借前尘翻盘"
         if MethodStyle(style) == MethodStyle.UNFETTERED:
             return "游锋", "游走牵制"
-    if player.root_affinity == Affinity.THUNDER:
+    affinity = _duel_method_affinity(player, method)
+    if affinity == Affinity.THUNDER:
         return "雷势", "一击定音"
-    if player.root_affinity == Affinity.WATER:
+    if affinity == Affinity.WATER:
         return "水势", "缠斗消磨"
-    if player.root_affinity == Affinity.FIRE:
+    if affinity == Affinity.FIRE:
         return "火势", "强攻压制"
-    if player.root_affinity == Affinity.EARTH:
+    if affinity == Affinity.EARTH:
         return "山势", "稳守反击"
+    if affinity == Affinity.WIND:
+        return "风势", "身法先行"
+    if affinity == Affinity.METAL:
+        return "锋势", "断脉破防"
+    if affinity == Affinity.WOOD:
+        return "青势", "生生不息"
+    if affinity == Affinity.VOID:
+        return "虚势", "乱流夺机"
     return "平势", "见机应变"
+
+
+def _duel_method_affinity(player: Player, method: dict[str, object] | None) -> Affinity:
+    if method is None:
+        return player.root_affinity
+    return Affinity(str(method["affinity"]))
+
+
+def _duel_resonance(player: Player, method: dict[str, object] | None) -> int:
+    if method is None:
+        return 0
+    resonance = 2 if _duel_method_affinity(player, method) == player.root_affinity else 0
+    resonance += min(2, int(method.get("mastery", 0)) // 60)
+    if MethodStyle(str(method["style"])) == MethodStyle.REBIRTH and player.rebirth_count > 0:
+        resonance += 1
+    return resonance
 
 
 def _duel_move_table(player: Player, method: dict[str, object] | None) -> list[dict[str, object]]:
     style = None if method is None else MethodStyle(str(method["style"]))
     method_type = None if method is None else MethodType(str(method["method_type"]))
+    affinity = _duel_method_affinity(player, method)
+    resonance = _duel_resonance(player, method)
     moves: list[dict[str, object]] = [
-        {"name": "运转灵机", "power": 4, "guard": 2, "crit": 0, "heal": 0},
-        {"name": "试探一式", "power": 7, "guard": 1, "crit": 5, "heal": 0},
-        {"name": "回气守势", "power": 2, "guard": 6, "crit": 0, "heal": 4},
+        {
+            "name": "运转灵机",
+            "power": 4,
+            "guard": 2,
+            "crit": 0,
+            "heal": 0,
+            "speed": 2,
+            "effect": "focus",
+            "effect_power": 2 + resonance,
+        },
+        {
+            "name": "试探一式",
+            "power": 7,
+            "guard": 1,
+            "crit": 5,
+            "heal": 0,
+            "speed": 0,
+            "effect": "wound",
+            "effect_power": 2 + resonance,
+        },
+        {
+            "name": "回气守势",
+            "power": 2,
+            "guard": 6,
+            "crit": 0,
+            "heal": 4,
+            "speed": -1,
+            "effect": "shield",
+            "effect_power": 4 + resonance,
+        },
     ]
-    if player.root_affinity == Affinity.THUNDER:
+    if affinity == Affinity.METAL:
+        moves[0]["name"] = "剑息凝锋"
+        moves[0]["speed"] = 3
+        moves[1]["name"] = "金锋断脉"
+        moves[1]["power"] = 9
+        moves[1]["crit"] = 7
+        moves[1]["effect_power"] = 4 + resonance
+    elif affinity == Affinity.WOOD:
+        moves[0]["name"] = "青藤缠灵"
+        moves[0]["effect_power"] = 4 + resonance
+        moves[2]["name"] = "春木回脉"
+        moves[2]["heal"] = 5
+        moves[2]["effect"] = "regen"
+        moves[2]["effect_power"] = 3 + resonance
+    elif affinity == Affinity.THUNDER:
         moves[1]["name"] = "雷引一闪"
         moves[1]["power"] = 10
         moves[1]["crit"] = 9
-    elif player.root_affinity == Affinity.FIRE:
+        moves[1]["effect"] = "stagger"
+        moves[1]["effect_power"] = 4 + resonance
+    elif affinity == Affinity.FIRE:
         moves[1]["name"] = "烈焰直冲"
         moves[1]["power"] = 9
+        moves[1]["crit"] = 6
+        moves[1]["effect"] = "burn"
+        moves[1]["effect_power"] = 3 + resonance
         moves[2]["heal"] = 2
-    elif player.root_affinity == Affinity.WATER:
-        moves[1]["name"] = "流水卸劲"
-        moves[1]["guard"] = 4
-        moves[2]["heal"] = 5
-    elif player.root_affinity == Affinity.EARTH:
-        moves[1]["name"] = "山岳镇压"
+    elif affinity == Affinity.WATER:
+        moves[0]["name"] = "流水照心"
+        moves[0]["guard"] = 3
+        moves[0]["effect"] = "slow"
+        moves[0]["effect_power"] = 2 + resonance
+        moves[1]["name"] = "潮落卸劲"
+        moves[1]["power"] = 8
         moves[1]["guard"] = 3
-        moves[2]["guard"] = 8
-    elif player.root_affinity == Affinity.VOID:
+        moves[2]["name"] = "灵泉护脉"
+        moves[2]["heal"] = 6
+        moves[2]["effect"] = "regen"
+        moves[2]["effect_power"] = 2 + resonance
+    elif affinity == Affinity.EARTH:
+        moves[0]["name"] = "坤息沉岳"
+        moves[0]["guard"] = 4
+        moves[1]["name"] = "山岳镇压"
+        moves[1]["power"] = 8
+        moves[1]["guard"] = 3
+        moves[1]["effect"] = "stagger"
+        moves[1]["effect_power"] = 2 + resonance
+        moves[2]["guard"] = 9
+        moves[2]["effect_power"] = 5 + resonance
+    elif affinity == Affinity.WIND:
+        moves[0]["name"] = "流风借势"
+        moves[0]["speed"] = 4
+        moves[0]["effect"] = "haste"
+        moves[0]["effect_power"] = 3 + resonance
+        moves[1]["name"] = "风裂回锋"
+        moves[1]["crit"] = 8
+        moves[1]["effect"] = "slow"
+        moves[1]["effect_power"] = 2 + resonance
+    elif affinity == Affinity.VOID:
+        moves[0]["name"] = "虚息回映"
+        moves[0]["effect"] = "echo"
+        moves[0]["effect_power"] = 2 + resonance
         moves[1]["name"] = "虚步藏锋"
         moves[1]["crit"] = 8
+        moves[1]["effect"] = "entropy"
+        moves[1]["effect_power"] = 3 + resonance
         moves[2]["heal"] = 3
 
     if style == MethodStyle.SURGING:
         moves[1]["power"] = int(moves[1]["power"]) + 2
+        moves[1]["crit"] = int(moves[1]["crit"]) + 1
     elif style == MethodStyle.INSIGHT:
         moves[0]["guard"] = int(moves[0]["guard"]) + 2
+        moves[0]["effect_power"] = int(moves[0]["effect_power"]) + 1
         moves[2]["heal"] = int(moves[2]["heal"]) + 1
     elif style == MethodStyle.REBIRTH:
         moves[0]["crit"] = int(moves[0]["crit"]) + 2
+        moves[0]["effect"] = "echo"
+        moves[0]["effect_power"] = int(moves[0]["effect_power"]) + 2
         moves[1]["crit"] = int(moves[1]["crit"]) + 2
     elif style == MethodStyle.UNFETTERED:
+        moves[0]["speed"] = int(moves[0]["speed"]) + 1
         moves[1]["guard"] = int(moves[1]["guard"]) + 2
 
     if method_type == MethodType.BATTLE:
         moves[1]["power"] = int(moves[1]["power"]) + 2
+        moves[1]["effect_power"] = int(moves[1]["effect_power"]) + 1
+        moves[1]["crit"] = int(moves[1]["crit"]) + 1
+    elif method_type == MethodType.MIND:
+        moves[0]["effect"] = "focus"
+        moves[0]["effect_power"] = int(moves[0]["effect_power"]) + 2
     elif method_type == MethodType.BODY:
         moves[2]["guard"] = int(moves[2]["guard"]) + 2
+        moves[2]["effect"] = "shield"
+        moves[2]["effect_power"] = int(moves[2]["effect_power"]) + 2
     elif method_type == MethodType.REBIRTH:
         moves[0]["heal"] = int(moves[0]["heal"]) + 2
+        moves[0]["effect"] = "echo"
+        moves[0]["effect_power"] = int(moves[0]["effect_power"]) + 2
         moves[1]["crit"] = int(moves[1]["crit"]) + 1
 
     if player.rebirth_count > 0:
+        moves[0]["effect_power"] = int(moves[0]["effect_power"]) + min(2, player.rebirth_count)
         moves[1]["crit"] = int(moves[1]["crit"]) + min(4, player.rebirth_count)
     if player.root_trait == RootTrait.EMBER:
         moves[1]["power"] = int(moves[1]["power"]) + 1
+        if str(moves[1]["effect"]) in {"burn", "wound", "stagger"}:
+            moves[1]["effect_power"] = int(moves[1]["effect_power"]) + 1
+        else:
+            moves[1]["effect"] = "burn"
+            moves[1]["effect_power"] = max(2, int(moves[1]["effect_power"]))
+    if player.root_trait == RootTrait.EVERGREEN:
+        moves[2]["heal"] = int(moves[2]["heal"]) + 1
+        if str(moves[2]["effect"]) == "shield":
+            moves[2]["effect"] = "regen"
+        moves[2]["effect_power"] = int(moves[2]["effect_power"]) + 1
     if player.root_trait == RootTrait.WANDERING:
+        moves[0]["speed"] = int(moves[0]["speed"]) + 1
         moves[1]["crit"] = int(moves[1]["crit"]) + 1
+    if player.destiny_type == DestinyType.BATTLE:
+        moves[1]["power"] = int(moves[1]["power"]) + 1 + player.destiny_level // 2
+    elif player.destiny_type == DestinyType.RESILIENT:
+        moves[2]["guard"] = int(moves[2]["guard"]) + 1 + player.destiny_level // 2
+        moves[2]["effect_power"] = int(moves[2]["effect_power"]) + 1
+    elif player.destiny_type == DestinyType.TURNFATE:
+        moves[0]["effect_power"] = int(moves[0]["effect_power"]) + 1 + player.destiny_level // 3
     return moves
+
+
+def _duel_empty_state() -> dict[str, int]:
+    return {
+        "burn": 0,
+        "focus": 0,
+        "shield": 0,
+        "stagger": 0,
+        "regen": 0,
+        "haste": 0,
+        "echo": 0,
+        "wound": 0,
+        "slow": 0,
+    }
+
+
+def _duel_initial_state(player: Player, method: dict[str, object] | None) -> dict[str, int]:
+    state = _duel_empty_state()
+    resonance = _duel_resonance(player, method)
+    if resonance:
+        state["focus"] += 1
+    if player.root_trait == RootTrait.EVERGREEN:
+        state["regen"] += 1
+    if player.root_trait == RootTrait.WANDERING:
+        state["haste"] += 1
+    if player.root_trait == RootTrait.EMBER and player.rebirth_count > 0:
+        state["echo"] += 1 + min(2, player.rebirth_count)
+    if player.destiny_type == DestinyType.BATTLE:
+        state["focus"] += 1 + player.destiny_level // 3
+    elif player.destiny_type == DestinyType.RESILIENT:
+        state["shield"] += 1 + player.destiny_level // 2
+    elif player.destiny_type == DestinyType.TURNFATE:
+        state["echo"] += 1 + player.destiny_level // 4
+    return state
+
+
+def _duel_apply_upkeep(player: Player, state: dict[str, int], hp: int) -> tuple[int, list[str]]:
+    notes: list[str] = []
+    if state["burn"] > 0:
+        burn_damage = state["burn"] + (1 if player.root_affinity == Affinity.FIRE else 0)
+        hp -= burn_damage
+        notes.append(f"{player.nickname}受灼伤[burn-{burn_damage}]")
+    if state["regen"] > 0:
+        regen_heal = state["regen"] + max(0, player.insight // 50)
+        hp += regen_heal
+        notes.append(f"{player.nickname}回生续脉[regen+{regen_heal}]")
+    if state["echo"] > 0 and player.rebirth_count > 0:
+        echo_heal = min(4 + player.rebirth_count, state["echo"])
+        hp += echo_heal
+        notes.append(f"{player.nickname}前尘回响[echo+{echo_heal}]")
+    return hp, notes
+
+
+def _duel_decay_state(state: dict[str, int]) -> None:
+    state["burn"] = max(0, state["burn"] - 1)
+    state["focus"] = max(0, state["focus"] - 2)
+    state["shield"] = max(0, state["shield"] - 2)
+    state["stagger"] = max(0, state["stagger"] - 2)
+    state["regen"] = max(0, state["regen"] - 1)
+    state["haste"] = max(0, state["haste"] - 1)
+    state["echo"] = max(0, state["echo"] - 1)
+    state["wound"] = max(0, state["wound"] - 1)
+    state["slow"] = max(0, state["slow"] - 1)
+
+
+def _duel_apply_effect(
+    actor: Player,
+    target: Player,
+    actor_state: dict[str, int],
+    target_state: dict[str, int],
+    move: dict[str, object],
+    landed: bool,
+) -> tuple[str | None, int]:
+    effect = str(move.get("effect") or "")
+    potency = int(move.get("effect_power", 0))
+    if not effect or potency <= 0:
+        return None, 0
+
+    if effect == "focus":
+        actor_state["focus"] = max(actor_state["focus"], potency)
+        return f"{actor.nickname}凝神蓄势[focus+{potency}]", 1
+    if effect == "shield":
+        actor_state["shield"] = max(actor_state["shield"], potency)
+        return f"{actor.nickname}护体成势[shield+{potency}]", 1
+    if effect == "regen":
+        actor_state["regen"] = max(actor_state["regen"], potency)
+        return f"{actor.nickname}生机回涌[regen+{potency}]", 1
+    if effect == "haste":
+        actor_state["haste"] = max(actor_state["haste"], potency)
+        return f"{actor.nickname}身法骤疾[haste+{potency}]", 1
+    if effect == "echo":
+        actor_state["echo"] = max(actor_state["echo"], potency + min(2, actor.rebirth_count))
+        return f"{actor.nickname}留住前尘回响[echo+{actor_state['echo']}]", 2
+
+    if not landed:
+        return None, 0
+
+    if effect == "burn":
+        target_state["burn"] = max(target_state["burn"], potency)
+        return f"{target.nickname}染上灼伤[burn+{potency}]", 2
+    if effect == "stagger":
+        target_state["stagger"] = max(target_state["stagger"], potency)
+        return f"{target.nickname}气机迟滞[stagger+{potency}]", 2
+    if effect == "wound":
+        target_state["wound"] = max(target_state["wound"], potency)
+        return f"{target.nickname}经脉受创[wound+{potency}]", 2
+    if effect == "slow":
+        target_state["slow"] = max(target_state["slow"], potency)
+        return f"{target.nickname}步调被拖慢[slow+{potency}]", 1
+    if effect == "entropy":
+        stripped = target_state["focus"] + target_state["shield"] + target_state["echo"]
+        target_state["focus"] = max(0, target_state["focus"] - potency)
+        target_state["shield"] = max(0, target_state["shield"] - potency)
+        target_state["echo"] = max(0, target_state["echo"] - 1)
+        actor_state["focus"] = max(actor_state["focus"], 1 + potency // 2)
+        lost = max(1, min(stripped, potency + 2))
+        return f"{actor.nickname}搅乱{target.nickname}气机[entropy-{lost}]", 2 + lost // 2
+    return None, 0
 
 
 def _duel_rounds(
@@ -1403,20 +1655,41 @@ def _duel_rounds(
     attacker_method: dict[str, object] | None,
     defender: Player,
     defender_method: dict[str, object] | None,
-) -> list[str]:
+) -> tuple[list[str], int, int]:
     attacker_signature, attacker_style_hint = _duel_signature(attacker, attacker_method)
     defender_signature, defender_style_hint = _duel_signature(defender, defender_method)
     attacker_moves = _duel_move_table(attacker, attacker_method)
     defender_moves = _duel_move_table(defender, defender_method)
+    attacker_state = _duel_initial_state(attacker, attacker_method)
+    defender_state = _duel_initial_state(defender, defender_method)
     attacker_hp = 100 + max(0, attacker.cultivation // 120)
     defender_hp = 100 + max(0, defender.cultivation // 120)
     logs: list[str] = []
+    attacker_swing = 0
+    defender_swing = 0
 
     for round_no in range(1, 4):
+        round_notes: list[str] = []
+        attacker_hp, attacker_notes = _duel_apply_upkeep(attacker, attacker_state, attacker_hp)
+        defender_hp, defender_notes = _duel_apply_upkeep(defender, defender_state, defender_hp)
+        round_notes.extend(attacker_notes)
+        round_notes.extend(defender_notes)
+        if attacker_hp <= 0 or defender_hp <= 0:
+            logs.append(
+                f"第{round_no}回合：两人气机先行反噬 | 余势 {max(0, attacker_hp)}/{max(0, defender_hp)}"
+            )
+            if round_notes:
+                logs.append("  触发：" + "；".join(round_notes))
+            break
+
         attacker_move = random.choice(attacker_moves)
         defender_move = random.choice(defender_moves)
         attacker_roll = random.randint(1, 100) + _duel_style_bonus(attacker_method) // 4
         defender_roll = random.randint(1, 100) + _duel_style_bonus(defender_method) // 4
+        attacker_roll += int(attacker_move["speed"]) + attacker_state["focus"] + attacker_state["haste"] + attacker_state["echo"] // 2
+        defender_roll += int(defender_move["speed"]) + defender_state["focus"] + defender_state["haste"] + defender_state["echo"] // 2
+        attacker_roll -= attacker_state["stagger"] + attacker_state["slow"]
+        defender_roll -= defender_state["stagger"] + defender_state["slow"]
 
         attacker_attack = (
             attacker_roll
@@ -1424,6 +1697,15 @@ def _duel_rounds(
             + _root_affinity_duel_bonus(attacker)
             + attacker.rebirth_count * 2
             + min(8, attacker.breakthrough_ready // 10)
+            + attacker_state["focus"] // 2
+        )
+        defender_attack = (
+            defender_roll
+            + int(defender_move["power"])
+            + _root_affinity_duel_bonus(defender)
+            + defender.rebirth_count * 2
+            + min(8, defender.breakthrough_ready // 10)
+            + defender_state["focus"] // 2
         )
         defender_defense = (
             defender_roll
@@ -1431,33 +1713,86 @@ def _duel_rounds(
             + _root_affinity_duel_bonus(defender)
             + defender.rebirth_count * 2
             + min(8, defender.breakthrough_ready // 10)
+            + defender_state["shield"]
+            - defender_state["wound"]
         )
-        attacker_damage = max(3, attacker_attack - defender_defense // 2)
-        defender_damage = max(2, defender_roll + int(defender_move["power"]) - attacker_roll // 2)
+        attacker_defense = (
+            attacker_roll
+            + int(attacker_move["guard"])
+            + _root_affinity_duel_bonus(attacker)
+            + attacker.rebirth_count * 2
+            + min(8, attacker.breakthrough_ready // 10)
+            + attacker_state["shield"]
+            - attacker_state["wound"]
+        )
+        attacker_damage = max(3, attacker_attack - max(10, defender_defense) // 2)
+        defender_damage = max(2, defender_attack - max(10, attacker_defense) // 2)
 
         if int(attacker_move["heal"]) > 0:
             attacker_hp += int(attacker_move["heal"]) + max(0, attacker.insight // 30)
         if int(defender_move["heal"]) > 0:
             defender_hp += int(defender_move["heal"]) + max(0, defender.insight // 30)
 
-        if int(attacker_move["crit"]) and attacker_roll + int(attacker_move["crit"]) >= defender_roll + 8:
-            attacker_damage += 6 + attacker.rebirth_count
-        if int(defender_move["crit"]) and defender_roll + int(defender_move["crit"]) >= attacker_roll + 8:
-            defender_damage += 6 + defender.rebirth_count
+        attacker_crit = int(attacker_move["crit"]) and attacker_roll + int(attacker_move["crit"]) >= defender_roll + 8
+        defender_crit = int(defender_move["crit"]) and defender_roll + int(defender_move["crit"]) >= attacker_roll + 8
+        if attacker_crit:
+            attacker_damage += 6 + attacker.rebirth_count + attacker_state["echo"] // 2
+            round_notes.append(f"{attacker.nickname}抓住破绽，攻势暴涨")
+        if defender_crit:
+            defender_damage += 6 + defender.rebirth_count + defender_state["echo"] // 2
+            round_notes.append(f"{defender.nickname}借机反震，攻势暴涨")
+
+        attacker_landed = attacker_attack >= defender_defense - 4
+        defender_landed = defender_attack >= attacker_defense - 4
+        attacker_note, attacker_effect_score = _duel_apply_effect(
+            attacker,
+            defender,
+            attacker_state,
+            defender_state,
+            attacker_move,
+            attacker_landed,
+        )
+        defender_note, defender_effect_score = _duel_apply_effect(
+            defender,
+            attacker,
+            defender_state,
+            attacker_state,
+            defender_move,
+            defender_landed,
+        )
+        if attacker_note:
+            round_notes.append(attacker_note)
+        if defender_note:
+            round_notes.append(defender_note)
 
         defender_hp -= attacker_damage
         attacker_hp -= defender_damage
+        attacker_swing += attacker_damage - defender_damage + attacker_effect_score + (2 if attacker_crit else 0)
+        defender_swing += defender_damage - attacker_damage + defender_effect_score + (2 if defender_crit else 0)
 
         logs.append(
             f"第{round_no}回合：{attacker.nickname}【{attacker_move['name']}】↔{defender.nickname}【{defender_move['name']}】"
             f" | {attacker.nickname}-{attacker_damage} / {defender.nickname}-{defender_damage}"
-            f" | 余势 {attacker_hp}/{defender_hp}"
+            f" | 余势 {max(0, attacker_hp)}/{max(0, defender_hp)}"
         )
+        if round_notes:
+            logs.append("  触发：" + "；".join(round_notes))
         if attacker_hp <= 0 or defender_hp <= 0:
             break
+        _duel_decay_state(attacker_state)
+        _duel_decay_state(defender_state)
 
     logs.append(f"{attacker.nickname}以{attacker_signature}对{defender_signature}，{attacker_style_hint}；{defender_style_hint}。")
-    return logs
+    attacker_edge = attacker_swing + max(0, attacker_hp - defender_hp) // 3
+    defender_edge = defender_swing + max(0, defender_hp - attacker_hp) // 3
+    if defender_hp <= 0:
+        attacker_edge += 18
+    if attacker_hp <= 0:
+        defender_edge += 18
+    attacker_bonus = max(0, min(24, attacker_edge // 6))
+    defender_bonus = max(0, min(24, defender_edge // 6))
+    logs.append(f"招式余势：{attacker.nickname} +{attacker_bonus}，{defender.nickname} +{defender_bonus}。")
+    return logs, attacker_bonus, defender_bonus
 
 
 def _duel_total(player: Player, method: dict[str, object] | None, roll_value: int) -> int:
@@ -2902,12 +3237,17 @@ async def duel(user_id: str, target: str) -> DuelResult:
     defender_methods = await _load_methods(repo, defender)
     attacker_primary = _primary_method(attacker, attacker_methods)
     defender_primary = _primary_method(defender, defender_methods)
-    duel_rounds = _duel_rounds(attacker, attacker_primary, defender, defender_primary)
+    duel_rounds, attacker_round_bonus, defender_round_bonus = _duel_rounds(
+        attacker,
+        attacker_primary,
+        defender,
+        defender_primary,
+    )
 
     attacker_roll = random.randint(1, 100) + world_state.adventure_bonus // 3
     defender_roll = random.randint(1, 100) + world_state.encounter_bonus // 3
-    attacker_total = _duel_total(attacker, attacker_primary, attacker_roll)
-    defender_total = _duel_total(defender, defender_primary, defender_roll)
+    attacker_total = _duel_total(attacker, attacker_primary, attacker_roll) + attacker_round_bonus
+    defender_total = _duel_total(defender, defender_primary, defender_roll) + defender_round_bonus
 
     if attacker_total == defender_total:
         if attacker.fortune >= defender.fortune:
