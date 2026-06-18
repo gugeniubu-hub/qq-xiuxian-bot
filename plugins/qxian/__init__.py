@@ -8,6 +8,7 @@ from xianbot.game_text import (
     DESIGN_SUMMARY_TEXT,
     HELP_TEXT,
     MARKET_SUMMARY_TEXT,
+    NEWBIE_GUIDE_TEXT,
     REBIRTH_SUMMARY_TEXT,
     SECT_SUMMARY_TEXT,
 )
@@ -32,6 +33,7 @@ from xianbot.services import (
     explore_ancient_trial,
     get_player_panel,
     get_player_methods,
+    get_recent_actions,
     get_player_status,
     get_rankings,
     get_today_world_event,
@@ -55,6 +57,7 @@ design_cmd = on_command("设计", aliases={"玩法设计", "初版设计"})
 sect_cmd = on_command("宗门帮助", aliases={"宗门设计"})
 market_cmd = on_command("坊市帮助", aliases={"坊市设计"})
 rebirth_help_cmd = on_command("轮回帮助", aliases={"转世帮助", "轮回设计"})
+newbie_cmd = on_command("新手引导", aliases={"新手", "开荒指引"})
 enter_path_cmd = on_command("入道")
 status_cmd = on_command("我的状态", aliases={"状态", "面板"})
 destiny_cmd = on_command("命格", aliases={"观命"})
@@ -81,6 +84,7 @@ market_list_cmd = on_command("坊市")
 market_create_cmd = on_command("坊市上架")
 market_buy_cmd = on_command("坊市购买", aliases={"购买"})
 ranking_cmd = on_command("排行", aliases={"排行榜"})
+recent_cmd = on_command("最近记录", aliases={"行动记录", "最近战报"})
 world_cmd = on_command("天象", aliases={"今日天象", "世界状态"})
 world_event_cmd = on_command("世界事件", aliases={"今日事件", "天命事件"})
 world_event_claim_cmd = on_command("领取事件", aliases={"领取天命", "事件领奖"})
@@ -105,6 +109,21 @@ def _duel_target_text(args: Message) -> str:
             if qq:
                 return str(qq)
     return ""
+
+
+def _cooldown_message(reason: str) -> str | None:
+    if not reason.startswith("action_cooldown:"):
+        return None
+    _, action_type, seconds_text = reason.split(":", 2)
+    seconds = max(1, int(seconds_text))
+    action_names = {
+        "adventure": "历练",
+        "encounter": "奇遇",
+        "duel": "斗法",
+        "ancient_trial": "古藏试炼",
+    }
+    action_name = action_names.get(action_type, "该操作")
+    return f"{action_name}刚做过一次，气机未稳，还需等 {seconds} 秒。"
 
 
 @help_cmd.handle()
@@ -184,6 +203,11 @@ async def handle_rebirth() -> None:
     await rebirth_help_cmd.finish(REBIRTH_SUMMARY_TEXT)
 
 
+@newbie_cmd.handle()
+async def handle_newbie_guide() -> None:
+    await newbie_cmd.finish(NEWBIE_GUIDE_TEXT)
+
+
 @enter_path_cmd.handle()
 async def handle_enter_path(event: MessageEvent) -> None:
     user_id = event.get_user_id()
@@ -208,6 +232,17 @@ async def handle_status(event: MessageEvent) -> None:
             await status_cmd.finish("你还未入道，发送“入道”开始。")
         raise
     await status_cmd.finish("\n".join(panel.lines))
+
+
+@recent_cmd.handle()
+async def handle_recent_actions(event: MessageEvent) -> None:
+    try:
+        result = await get_recent_actions(event.get_user_id())
+    except GameError as exc:
+        if str(exc) == "player_not_found":
+            await recent_cmd.finish("你还未入道，发送“入道”开始。")
+        raise
+    await recent_cmd.finish("\n".join(result.lines))
 
 
 @destiny_cmd.handle()
@@ -420,6 +455,9 @@ async def handle_adventure(event: MessageEvent) -> None:
         result = await adventure(event.get_user_id())
     except GameError as exc:
         reason = str(exc)
+        cooldown_message = _cooldown_message(reason)
+        if cooldown_message is not None:
+            await adventure_cmd.finish(cooldown_message)
         if reason == "player_not_found":
             await adventure_cmd.finish("你还未入道，发送“入道”开始。")
         if reason == "not_enough_stamina":
@@ -449,6 +487,9 @@ async def handle_encounter(event: MessageEvent) -> None:
         result = await encounter(event.get_user_id())
     except GameError as exc:
         reason = str(exc)
+        cooldown_message = _cooldown_message(reason)
+        if cooldown_message is not None:
+            await encounter_cmd.finish(cooldown_message)
         if reason == "player_not_found":
             await encounter_cmd.finish("你还未入道，发送“入道”开始。")
         if reason == "not_enough_stamina":
@@ -683,6 +724,9 @@ async def handle_ancient_trial(event: MessageEvent) -> None:
         result = await explore_ancient_trial(event.get_user_id())
     except GameError as exc:
         reason = str(exc)
+        cooldown_message = _cooldown_message(reason)
+        if cooldown_message is not None:
+            await ancient_trial_cmd.finish(cooldown_message)
         if reason == "player_not_found":
             await ancient_trial_cmd.finish("你还未入道，发送“入道”开始。")
         if reason == "ancient_trial_locked":
@@ -715,6 +759,9 @@ async def handle_duel(event: MessageEvent, args: Message = CommandArg()) -> None
         result = await duel(event.get_user_id(), target)
     except GameError as exc:
         reason = str(exc)
+        cooldown_message = _cooldown_message(reason)
+        if cooldown_message is not None:
+            await duel_cmd.finish(cooldown_message)
         if reason == "player_not_found":
             await duel_cmd.finish("你还未入道，发送“入道”开始。")
         if reason == "target_not_found":

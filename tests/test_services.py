@@ -24,6 +24,7 @@ from xianbot.services import (
     get_destiny_status,
     get_player_panel,
     get_player_methods,
+    get_recent_actions,
     get_player_status,
     get_today_world_event,
     get_today_world_state,
@@ -1160,6 +1161,89 @@ def test_artifact_equipment_panel_and_duel_bonus(tmp_path, monkeypatch) -> None:
 
         assert duel_result.winner_name == "artifactor"
         assert any("burn+" in line or "攻势暴涨" in line for line in duel_result.rounds)
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_panel_recent_actions_and_action_cooldowns(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian22.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("QXIAN_ACTION_COOLDOWN_ADVENTURE_SECONDS", "30")
+    monkeypatch.setenv("QXIAN_ACTION_COOLDOWN_ENCOUNTER_SECONDS", "30")
+    monkeypatch.setenv("QXIAN_ACTION_COOLDOWN_DUEL_SECONDS", "30")
+    monkeypatch.setenv("QXIAN_ACTION_COOLDOWN_TRIAL_SECONDS", "30")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("93001", "routefinder")
+        await create_player_if_missing("93002", "sparmate")
+        repo = GameRepository(get_settings().database_url)
+
+        panel = await get_player_panel("93001")
+        panel_text = "\n".join(panel.lines)
+        assert "下一步建议:" in panel_text
+        assert "宗门列表" in panel_text
+
+        await join_sect("93001", "青岚宗")
+        panel_after_join = await get_player_panel("93001")
+        assert any("下一步建议:" in line for line in panel_after_join.lines)
+
+        import xianbot.services as services
+
+        original_randint = services.random.randint
+        services.random.randint = lambda a, b: 60
+        try:
+            result = await adventure("93001")
+            assert result.roll_value >= 60
+            try:
+                await adventure("93001")
+            except GameError as exc:
+                assert str(exc).startswith("action_cooldown:adventure:")
+            else:
+                raise AssertionError("adventure cooldown should block immediate repeat")
+        finally:
+            services.random.randint = original_randint
+
+        recent = await get_recent_actions("93001")
+        recent_text = "\n".join(recent.lines)
+        assert "最近记录:" in recent_text
+        assert "历练" in recent_text
+
+        await repo.update_player_stats(
+            "93001",
+            realm=Realm.FOUNDATION_2,
+            cultivation_delta=1800,
+            insight_delta=18,
+            breakthrough_ready_delta=25,
+            fortune_delta=8,
+        )
+        await repo.update_player_stats(
+            "93002",
+            realm=Realm.QI_4,
+            cultivation_delta=700,
+            insight_delta=6,
+            breakthrough_ready_delta=12,
+            fortune_delta=3,
+        )
+
+        sequence = iter([62, 38, 58, 40, 65, 36, 72, 34, 50])
+        services.random.randint = lambda a, b: next(sequence, 50)
+        try:
+            duel_result = await duel("93001", "93002")
+            assert duel_result.rounds
+            try:
+                await duel("93001", "93002")
+            except GameError as exc:
+                assert str(exc).startswith("action_cooldown:duel:")
+            else:
+                raise AssertionError("duel cooldown should block immediate repeat")
+        finally:
+            services.random.randint = original_randint
+
+        recent_again = await get_recent_actions("93001")
+        assert any("斗法" in line for line in recent_again.lines)
 
     asyncio.run(scenario())
     get_settings.cache_clear()

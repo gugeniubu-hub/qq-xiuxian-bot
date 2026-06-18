@@ -217,6 +217,15 @@ CREATE TABLE IF NOT EXISTS world_event_contributions (
   FOREIGN KEY (event_date) REFERENCES world_events(event_date),
   FOREIGN KEY (user_id) REFERENCES players(user_id)
 );
+
+CREATE TABLE IF NOT EXISTS player_action_cooldowns (
+  user_id TEXT NOT NULL,
+  action_type TEXT NOT NULL,
+  available_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, action_type),
+  FOREIGN KEY (user_id) REFERENCES players(user_id)
+);
 """
 
 DEFAULT_SECTS = (

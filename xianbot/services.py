@@ -641,6 +641,11 @@ class PlayerPanelResult:
 
 
 @dataclass(slots=True)
+class RecentActionResult:
+    lines: list[str]
+
+
+@dataclass(slots=True)
 class MethodInsightResult:
     method_name: str
     mastery_gain: int
@@ -717,6 +722,11 @@ def _today() -> date:
     return _now().date()
 
 
+def _parse_timestamp(value: str) -> datetime:
+    normalized = value.replace("Z", "+00:00")
+    return datetime.fromisoformat(normalized)
+
+
 def _root_rank(root_type: RootType) -> int:
     return ROOT_TYPE_ORDER.index(root_type)
 
@@ -733,6 +743,74 @@ def _effective_max_realm(player: Player) -> Realm:
 
 def _realm_cap_brief(player: Player) -> str:
     return _effective_max_realm(player).value
+
+
+def _next_step_hint(player: Player) -> str:
+    adventure_cost = get_settings().adventure_stamina_cost
+    encounter_cost = _encounter_cost()
+    if player.sect_id is None:
+        return "下一步建议: 先看“宗门列表”，再用“加入宗门 宗门名”拿到第一门主修。"
+    if player.primary_method_id is None:
+        return "下一步建议: 先发送“我的功法”，再用“主修功法 功法名”定下路线。"
+    target = next_realm(player.realm)
+    if target is not None and player.cultivation < realm_requirement(target):
+        gap = realm_requirement(target) - player.cultivation
+        if player.stamina >= max(adventure_cost, encounter_cost):
+            return f"下一步建议: 距离下个境界还差 {gap} 修为，可先“历练”或“闭关 30 吐纳”。"
+        return f"下一步建议: 距离下个境界还差 {gap} 修为，体力偏低时更适合“闭关 30 吐纳”。"
+    if target is not None and player.breakthrough_ready < 24:
+        return "下一步建议: 修为已够，但底蕴不足，先“闭关 30 冲关”或服用凝元丹。"
+    if player.realm == _effective_max_realm(player):
+        if can_rebirth(player):
+            return "下一步建议: 你已摸到此世尽头，可直接“转世”开启下一轮构筑。"
+        return "下一步建议: 已接近此世上限，先攒轮回印记、法宝和洗髓资源。"
+    if player.stamina >= encounter_cost:
+        return "下一步建议: 当前适合“奇遇”搏资源，再决定是否炼丹、斗法或冲关。"
+    return "下一步建议: 先“签到”或“闭关”缓一口气，再继续外出行动。"
+
+
+def _recent_action_brief(action_type: str) -> str:
+    mapping = {
+        "adventure": "历练",
+        "encounter": "奇遇",
+        "duel": "斗法",
+        "ancient_trial": "古藏试炼",
+    }
+    return mapping.get(action_type, action_type)
+
+
+def _cooldown_seconds_for(action_type: str) -> int:
+    settings = get_settings()
+    mapping = {
+        "adventure": settings.action_cooldown_adventure_seconds,
+        "encounter": settings.action_cooldown_encounter_seconds,
+        "duel": settings.action_cooldown_duel_seconds,
+        "ancient_trial": settings.action_cooldown_trial_seconds,
+    }
+    return mapping.get(action_type, 0)
+
+
+async def _check_action_cooldown(repo: GameRepository, user_id: str, action_type: str) -> None:
+    cooldown_seconds = _cooldown_seconds_for(action_type)
+    if cooldown_seconds <= 0:
+        return
+    row = await repo.get_action_cooldown(user_id, action_type)
+    if row is None:
+        return
+    available_at = _parse_timestamp(str(row["available_at"]))
+    now = _now()
+    if available_at <= now:
+        return
+    remaining = max(1, int((available_at - now).total_seconds()))
+    raise GameError(f"action_cooldown:{action_type}:{remaining}")
+
+
+async def _set_action_cooldown(repo: GameRepository, user_id: str, action_type: str) -> None:
+    cooldown_seconds = _cooldown_seconds_for(action_type)
+    if cooldown_seconds <= 0:
+        return
+    available_at = _now() + timedelta(seconds=cooldown_seconds)
+    await repo.set_action_cooldown(user_id, action_type, available_at.isoformat())
 
 
 def _root_rarity_brief(player: Player) -> str:
@@ -2413,6 +2491,39 @@ async def get_player_methods(user_id: str) -> list[dict[str, object]]:
     return await _load_methods(repo, player)
 
 
+async def get_recent_actions(user_id: str, limit: int = 5) -> RecentActionResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+    rows = await repo.list_recent_actions(user_id, limit)
+    if not rows:
+        return RecentActionResult(lines=["最近尚无行动记录。先去历练、奇遇、斗法或古藏试炼吧。"])
+
+    item_name_map: dict[str, str] = {}
+    for row in rows:
+        reward_item_id = row.get("reward_item_id")
+        if reward_item_id is None:
+            continue
+        reward_item_id_str = str(reward_item_id)
+        if reward_item_id_str in item_name_map:
+            continue
+        item = await repo.get_item_by_id(reward_item_id_str)
+        item_name_map[reward_item_id_str] = reward_item_id_str if item is None else str(item["name"])
+
+    lines = ["最近记录:"]
+    for row in rows:
+        action_name = _recent_action_brief(str(row["action_type"]))
+        reward_line = f"灵石 {int(row['reward_spirit_stones']):+} / 修为 {int(row['reward_cultivation']):+}"
+        reward_item_id = row.get("reward_item_id")
+        if reward_item_id is not None:
+            reward_line += f" / 掉落 {item_name_map.get(str(reward_item_id), str(reward_item_id))}"
+        lines.append(
+            f"- {action_name} roll={int(row['roll_value'] or 0)} | {row['outcome']} | {reward_line}"
+        )
+    return RecentActionResult(lines=lines)
+
+
 async def list_inventory(user_id: str) -> list[dict[str, object]]:
     return await get_repository().list_inventory(user_id)
 
@@ -2475,6 +2586,7 @@ async def get_player_panel(user_id: str) -> PlayerPanelResult:
         f"灵石: {player.spirit_stones} | 福缘: {player.fortune} | 体力: {player.stamina}",
         f"寿元: {player.age}/{player.lifespan}",
         f"轮回: {player.rebirth_count} 转 | 前尘点: {player.legacy_points} | 轮回印记: {player.soul_marks}",
+        _next_step_hint(player),
     ]
     return PlayerPanelResult(lines=lines)
 
@@ -2577,6 +2689,7 @@ async def adventure(user_id: str) -> AdventureResult:
     player = await repo.get_player(user_id)
     if player is None:
         raise GameError("player_not_found")
+    await _check_action_cooldown(repo, user_id, "adventure")
 
     settings = get_settings()
     if player.stamina < settings.adventure_stamina_cost:
@@ -2700,6 +2813,7 @@ async def adventure(user_id: str) -> AdventureResult:
         reward_cultivation=cultivation_gain,
         reward_item_id=item_id,
     )
+    await _set_action_cooldown(repo, user_id, "adventure")
     _, lifespan_notice = await _apply_lifespan_progress(
         repo,
         player,
@@ -2728,6 +2842,7 @@ async def encounter(user_id: str) -> EncounterResult:
     player = await repo.get_player(user_id)
     if player is None:
         raise GameError("player_not_found")
+    await _check_action_cooldown(repo, user_id, "encounter")
 
     stamina_cost = _encounter_cost()
     if player.stamina < stamina_cost:
@@ -2846,6 +2961,7 @@ async def encounter(user_id: str) -> EncounterResult:
         reward_cultivation=cultivation_gain,
         reward_item_id=item_id,
     )
+    await _set_action_cooldown(repo, user_id, "encounter")
     _, lifespan_notice = await _apply_lifespan_progress(
         repo,
         player,
@@ -3453,6 +3569,7 @@ async def duel(user_id: str, target: str) -> DuelResult:
     attacker = await repo.get_player(user_id)
     if attacker is None:
         raise GameError("player_not_found")
+    await _check_action_cooldown(repo, user_id, "duel")
     defender = await _resolve_player_target(target)
     if defender is None:
         raise GameError("target_not_found")
@@ -3545,6 +3662,7 @@ async def duel(user_id: str, target: str) -> DuelResult:
         reward_cultivation=reward_cultivation,
         reward_item_id=None,
     )
+    await _set_action_cooldown(repo, user_id, "duel")
     event_notice = await _record_world_event_progress(winner, "duel")
 
     return DuelResult(
@@ -3641,6 +3759,7 @@ async def explore_ancient_trial(user_id: str) -> AncientTrialResult:
     player = await repo.get_player(user_id)
     if player is None:
         raise GameError("player_not_found")
+    await _check_action_cooldown(repo, user_id, "ancient_trial")
     if player.rebirth_count < 2:
         raise GameError("ancient_trial_locked")
     if player.stamina < 18:
@@ -3675,6 +3794,7 @@ async def explore_ancient_trial(user_id: str) -> AncientTrialResult:
         reward_cultivation = random.randint(180, 320)
         reward_cultivation = int(reward_cultivation * (1 + _training_multiplier(player, primary_method)))
         reward_insight = random.randint(2, 4) + max(1, player.rebirth_count - 1)
+        message = "你在太虚古藏的残壁间稳住了神识，接住了一缕前尘回响。"
         item_id = _ancient_trial_item_id(player)
         item = await repo.get_item_by_id(item_id)
         if item is not None:
@@ -3687,7 +3807,16 @@ async def explore_ancient_trial(user_id: str) -> AncientTrialResult:
             insight_delta=reward_insight,
             stamina_delta=-18,
         )
-        message = "你在太虚古藏的残壁间稳住了神识，接住了一缕前尘回响。"
+        await repo.record_adventure(
+            user_id,
+            action_type="ancient_trial",
+            roll_value=roll_value,
+            outcome=message,
+            reward_spirit_stones=reward_spirit,
+            reward_cultivation=reward_cultivation,
+            reward_item_id=item_id,
+        )
+        await _set_action_cooldown(repo, user_id, "ancient_trial")
         return AncientTrialResult(
             trial_name="太虚古藏试炼",
             roll_value=roll_value,
@@ -3706,6 +3835,16 @@ async def explore_ancient_trial(user_id: str) -> AncientTrialResult:
         cultivation_delta=cultivation_loss,
         stamina_delta=-18,
     )
+    await repo.record_adventure(
+        user_id,
+        action_type="ancient_trial",
+        roll_value=roll_value,
+        outcome="古藏残响反噬心神，你强行退了出来，只留下一身余震。",
+        reward_spirit_stones=0,
+        reward_cultivation=cultivation_loss,
+        reward_item_id=None,
+    )
+    await _set_action_cooldown(repo, user_id, "ancient_trial")
     return AncientTrialResult(
         trial_name="太虚古藏试炼",
         roll_value=roll_value,

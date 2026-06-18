@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     duel_stamina_cost: int = Field(default=18)
     duel_daily_reward_spirit_stones_min: int = Field(default=28)
     duel_daily_reward_spirit_stones_max: int = Field(default=66)
+    action_cooldown_adventure_seconds: int = Field(default=0)
+    action_cooldown_encounter_seconds: int = Field(default=0)
+    action_cooldown_duel_seconds: int = Field(default=0)
+    action_cooldown_trial_seconds: int = Field(default=0)
 
 
 @lru_cache

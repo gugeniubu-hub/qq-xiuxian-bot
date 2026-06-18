@@ -1110,6 +1110,57 @@ class GameRepository:
             )
             await db.commit()
 
+    async def list_recent_actions(self, user_id: str, limit: int = 5) -> list[dict[str, Any]]:
+        async with self._connect() as db:
+            rows = await self._fetchall(
+                db,
+                """
+                SELECT
+                  action_type,
+                  roll_value,
+                  outcome,
+                  reward_spirit_stones,
+                  reward_cultivation,
+                  reward_item_id,
+                  created_at
+                FROM adventure_logs
+                WHERE user_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            )
+        return [dict(row) for row in rows]
+
+    async def get_action_cooldown(self, user_id: str, action_type: str) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT user_id, action_type, available_at, updated_at
+                FROM player_action_cooldowns
+                WHERE user_id = ? AND action_type = ?
+                """,
+                (user_id, action_type),
+            )
+        return None if row is None else dict(row)
+
+    async def set_action_cooldown(self, user_id: str, action_type: str, available_at: str) -> None:
+        async with self._connect() as db:
+            await db.execute(
+                """
+                INSERT INTO player_action_cooldowns (
+                  user_id, action_type, available_at, updated_at
+                ) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, action_type)
+                DO UPDATE SET
+                  available_at = excluded.available_at,
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (user_id, action_type, available_at),
+            )
+            await db.commit()
+
     async def get_world_state(self, state_date: str) -> dict[str, Any] | None:
         async with self._connect() as db:
             row = await self._fetchone(
