@@ -16,15 +16,18 @@ from xianbot.services import (
     create_market_listing,
     create_player_if_missing,
     duel,
+    equip_artifact,
     encounter,
     end_meditation,
     explore_ancient_trial,
     get_destiny_status,
+    get_player_panel,
     get_player_methods,
     get_player_status,
     get_today_world_event,
     get_today_world_state,
     join_sect,
+    list_artifacts,
     rebirth,
     list_inventory,
     set_primary_method,
@@ -1016,6 +1019,71 @@ def test_duel_moves_can_trigger_status_effect_logs(tmp_path, monkeypatch) -> Non
         assert "第1回合" in text
         assert "触发：" in text
         assert any(tag in text for tag in ("echo+", "burn+", "regen+", "focus+", "entropy-"))
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_artifact_equipment_panel_and_duel_bonus(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian21.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("92001", "artifactor")
+        await create_player_if_missing("92002", "sparring")
+        await join_sect("92001", "赤霄门")
+        await join_sect("92002", "青岚宗")
+
+        repo = GameRepository(get_settings().database_url)
+        await repo.update_player_stats(
+            "92001",
+            rebirth_count_delta=1,
+            realm=Realm.CORE_1,
+            root_affinity=Affinity.FIRE,
+            cultivation_delta=3000,
+            insight_delta=28,
+            breakthrough_ready_delta=30,
+            fortune_delta=10,
+        )
+        await repo.update_player_stats(
+            "92002",
+            realm=Realm.FOUNDATION_3,
+            root_affinity=Affinity.WATER,
+            cultivation_delta=2200,
+            insight_delta=18,
+            breakthrough_ready_delta=18,
+            fortune_delta=6,
+        )
+
+        await repo.add_inventory_item("92001", "artifact-flame-seal", 1)
+        artifacts = await list_artifacts("92001")
+        assert any(artifact["name"] == "赤焰印" for artifact in artifacts)
+
+        equipped = await equip_artifact("92001", "赤焰印")
+        assert equipped.artifact_name == "赤焰印"
+
+        panel = await get_player_panel("92001")
+        panel_text = "\n".join(panel.lines)
+        assert "法宝: 赤焰印" in panel_text
+        assert "火灵根" in panel_text or "灵根:" in panel_text
+
+        import xianbot.services as services
+
+        duel_choice = services.random.choice
+        duel_randint = services.random.randint
+        services.random.choice = lambda seq: seq[1]
+        sequence = iter([60, 42, 58, 45, 62, 40, 88, 36, 52])
+        services.random.randint = lambda a, b: next(sequence, 52)
+        try:
+            duel_result = await duel("92001", "92002")
+        finally:
+            services.random.choice = duel_choice
+            services.random.randint = duel_randint
+
+        assert duel_result.winner_name == "artifactor"
+        assert any("burn+" in line or "攻势暴涨" in line for line in duel_result.rounds)
 
     asyncio.run(scenario())
     get_settings.cache_clear()

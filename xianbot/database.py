@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS players (
   destiny_level INTEGER NOT NULL DEFAULT 0,
   sect_id TEXT,
   primary_method_id TEXT,
+  equipped_artifact_id TEXT,
   meditation_started_at TEXT,
   meditation_until TEXT,
   meditation_minutes INTEGER NOT NULL DEFAULT 0,
@@ -89,6 +90,17 @@ CREATE TABLE IF NOT EXISTS items (
   base_price INTEGER NOT NULL DEFAULT 0,
   consumable INTEGER NOT NULL DEFAULT 0,
   tradable INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS player_artifacts (
+  user_id TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  mastery INTEGER NOT NULL DEFAULT 0,
+  equipped INTEGER NOT NULL DEFAULT 0,
+  acquired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, item_id),
+  FOREIGN KEY (user_id) REFERENCES players(user_id),
+  FOREIGN KEY (item_id) REFERENCES items(id)
 );
 
 CREATE TABLE IF NOT EXISTS inventories (
@@ -370,6 +382,12 @@ DEFAULT_ITEMS = (
     ("longevity-fruit", "延寿果", "灵果", "稀有", "服下后可滋养气血，少量延缓寿元流逝。", 380, 1, 1),
     ("rebirth-mark", "轮回印记", "秘物", "稀有", "转世重修所需的关键凭证。", 5000, 1, 1),
     ("method-fragment", "吐纳残篇", "功法残篇", "稀有", "可用于参悟基础吐纳类功法。", 250, 0, 1),
+    ("artifact-iron-sword", "玄铁飞剑", "法宝", "凡品", "最常见的攻伐法宝，斗法时略增伤势。", 360, 0, 1),
+    ("artifact-cloud-bell", "青云铃", "法宝", "黄阶", "铃音可稳住心神，闭关与斗法皆有助益。", 680, 0, 1),
+    ("artifact-flame-seal", "赤焰印", "法宝", "黄阶", "火性攻伐法宝，适合霸烈战诀与火灵根。", 760, 0, 1),
+    ("artifact-wind-boots", "追风履", "法宝", "玄阶", "身法类法宝，斗法时更易抢得先机。", 980, 0, 1),
+    ("artifact-thunder-banner", "引雷幡", "法宝", "玄阶", "雷性法宝，擅长迟滞敌手气机。", 1180, 0, 1),
+    ("artifact-mirror-jade", "照心玉", "法宝", "玄阶", "辅助参玄悟道，也能在斗法中稳住神识。", 1280, 0, 1),
 )
 
 
@@ -458,6 +476,7 @@ def _ensure_schema_compatibility(connection: sqlite3.Connection) -> None:
         "destiny_type": None,
         "destiny_level": 0,
         "primary_method_id": None,
+        "equipped_artifact_id": None,
         "meditation_mode": None,
         "meditation_insight_reward": 0,
         "meditation_breakthrough_reward": 0,
@@ -492,4 +511,23 @@ def _ensure_schema_compatibility(connection: sqlite3.Connection) -> None:
             continue
         connection.execute(
             f"ALTER TABLE cultivation_methods ADD COLUMN {column} {column_type} NOT NULL DEFAULT {default_sql}"
+        )
+
+    artifact_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(player_artifacts)").fetchall()
+    }
+    if not artifact_columns:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS player_artifacts (
+              user_id TEXT NOT NULL,
+              item_id TEXT NOT NULL,
+              mastery INTEGER NOT NULL DEFAULT 0,
+              equipped INTEGER NOT NULL DEFAULT 0,
+              acquired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (user_id, item_id),
+              FOREIGN KEY (user_id) REFERENCES players(user_id),
+              FOREIGN KEY (item_id) REFERENCES items(id)
+            )
+            """
         )

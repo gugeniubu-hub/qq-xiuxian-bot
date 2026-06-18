@@ -62,6 +62,7 @@ class GameRepository:
             player.destiny_level,
             player.sect_id,
             player.primary_method_id,
+            player.equipped_artifact_id,
             player.meditation_started_at,
             player.meditation_until,
             player.meditation_minutes,
@@ -133,6 +134,7 @@ class GameRepository:
                   root_trait, realm, cultivation, age, age_progress, lifespan,
                   spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
                   rebirth_count, soul_marks, legacy_points, destiny_type, destiny_level, sect_id, primary_method_id,
+                  equipped_artifact_id,
                   meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
                   meditation_method_id, meditation_mode, meditation_insight_reward,
                   meditation_breakthrough_reward
@@ -172,6 +174,7 @@ class GameRepository:
             destiny_level=int(row["destiny_level"]),
             sect_id=row["sect_id"],
             primary_method_id=row["primary_method_id"],
+            equipped_artifact_id=row["equipped_artifact_id"],
             meditation_started_at=row["meditation_started_at"],
             meditation_until=row["meditation_until"],
             meditation_minutes=int(row["meditation_minutes"]),
@@ -212,6 +215,7 @@ class GameRepository:
                   root_trait, realm, cultivation, age, age_progress, lifespan,
                   spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
                   rebirth_count, soul_marks, legacy_points, destiny_type, destiny_level, sect_id, primary_method_id,
+                  equipped_artifact_id,
                   meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
                   meditation_method_id, meditation_mode, meditation_insight_reward,
                   meditation_breakthrough_reward
@@ -232,15 +236,16 @@ class GameRepository:
                 await db.execute("BEGIN IMMEDIATE")
                 cursor = await db.execute(
                     """
-                    INSERT OR IGNORE INTO players (
-                      user_id, nickname, root_type, root_affinity, root_purity, root_temperament,
-                      root_trait, realm, cultivation, age, age_progress, lifespan,
-                      spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
-                      rebirth_count, soul_marks, legacy_points, destiny_type, destiny_level, sect_id, primary_method_id,
-                      meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
-                      meditation_method_id, meditation_mode, meditation_insight_reward,
-                      meditation_breakthrough_reward
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO players (
+                  user_id, nickname, root_type, root_affinity, root_purity, root_temperament,
+                  root_trait, realm, cultivation, age, age_progress, lifespan,
+                  spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
+                  rebirth_count, soul_marks, legacy_points, destiny_type, destiny_level, sect_id, primary_method_id,
+                  equipped_artifact_id,
+                  meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
+                  meditation_method_id, meditation_mode, meditation_insight_reward,
+                  meditation_breakthrough_reward
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     self._player_insert_params(player),
                 )
@@ -285,6 +290,7 @@ class GameRepository:
         root_trait: RootTrait | None = None,
         destiny_type: DestinyType | None | object = None,
         primary_method_id: str | None | object = None,
+        equipped_artifact_id: str | None | object = None,
         sect_id: str | None | object = None,
     ) -> None:
         updates: list[str] = []
@@ -347,6 +353,9 @@ class GameRepository:
         if primary_method_id is not None:
             updates.append("primary_method_id = ?")
             params.append(primary_method_id)
+        if equipped_artifact_id is not None:
+            updates.append("equipped_artifact_id = ?")
+            params.append(equipped_artifact_id)
         if sect_id is not None:
             updates.append("sect_id = ?")
             params.append(sect_id)
@@ -419,6 +428,7 @@ class GameRepository:
                   breakthrough_ready = 0,
                   sect_id = NULL,
                   primary_method_id = NULL,
+                  equipped_artifact_id = NULL,
                   meditation_started_at = NULL,
                   meditation_until = NULL,
                   meditation_minutes = 0,
@@ -882,6 +892,128 @@ class GameRepository:
                 DO UPDATE SET quantity = quantity + excluded.quantity
                 """,
                 (user_id, item_id, quantity),
+            )
+            item = await self._fetchone(
+                db,
+                """
+                SELECT item_type
+                FROM items
+                WHERE id = ?
+                """,
+                (item_id,),
+            )
+            if item is not None and str(item["item_type"]) == "法宝":
+                await db.execute(
+                    """
+                    INSERT OR IGNORE INTO player_artifacts (user_id, item_id, mastery, equipped)
+                    VALUES (?, ?, 0, 0)
+                    """,
+                    (user_id, item_id),
+                )
+            await db.commit()
+
+    async def list_player_artifacts(self, user_id: str) -> list[dict[str, Any]]:
+        async with self._connect() as db:
+            rows = await self._fetchall(
+                db,
+                """
+                SELECT
+                  pa.item_id,
+                  it.name,
+                  it.rarity,
+                  it.description,
+                  pa.mastery,
+                  CASE WHEN p.equipped_artifact_id = pa.item_id THEN 1 ELSE pa.equipped END AS equipped
+                FROM player_artifacts pa
+                INNER JOIN items it ON it.id = pa.item_id
+                INNER JOIN players p ON p.user_id = pa.user_id
+                WHERE pa.user_id = ?
+                ORDER BY equipped DESC, pa.mastery DESC, it.rarity DESC, it.name
+                """,
+                (user_id,),
+            )
+        return [dict(row) for row in rows]
+
+    async def get_equipped_artifact(self, user_id: str) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT
+                  pa.item_id,
+                  it.name,
+                  it.rarity,
+                  it.description,
+                  pa.mastery,
+                  1 AS equipped
+                FROM players p
+                INNER JOIN player_artifacts pa
+                  ON pa.user_id = p.user_id AND pa.item_id = p.equipped_artifact_id
+                INNER JOIN items it ON it.id = pa.item_id
+                WHERE p.user_id = ?
+                """,
+                (user_id,),
+            )
+        return None if row is None else dict(row)
+
+    async def get_player_artifact_by_name(
+        self,
+        user_id: str,
+        artifact_name: str,
+    ) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT
+                  pa.item_id,
+                  it.name,
+                  it.rarity,
+                  it.description,
+                  pa.mastery,
+                  CASE WHEN p.equipped_artifact_id = pa.item_id THEN 1 ELSE pa.equipped END AS equipped
+                FROM player_artifacts pa
+                INNER JOIN items it ON it.id = pa.item_id
+                INNER JOIN players p ON p.user_id = pa.user_id
+                INNER JOIN inventories inv
+                  ON inv.user_id = pa.user_id AND inv.item_id = pa.item_id AND inv.quantity > 0
+                WHERE pa.user_id = ? AND it.name = ? AND it.item_type = '法宝'
+                """,
+                (user_id, artifact_name),
+            )
+        return None if row is None else dict(row)
+
+    async def set_equipped_artifact(self, user_id: str, item_id: str) -> None:
+        async with self._connect() as db:
+            await db.execute(
+                """
+                UPDATE player_artifacts
+                SET equipped = CASE WHEN item_id = ? THEN 1 ELSE 0 END
+                WHERE user_id = ?
+                """,
+                (item_id, user_id),
+            )
+            await db.execute(
+                """
+                UPDATE players
+                SET equipped_artifact_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                """,
+                (item_id, user_id),
+            )
+            await db.commit()
+
+    async def add_artifact_mastery(self, user_id: str, item_id: str, amount: int) -> None:
+        if amount <= 0:
+            return
+        async with self._connect() as db:
+            await db.execute(
+                """
+                UPDATE player_artifacts
+                SET mastery = mastery + ?
+                WHERE user_id = ? AND item_id = ?
+                """,
+                (amount, user_id, item_id),
             )
             await db.commit()
 

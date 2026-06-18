@@ -168,6 +168,7 @@ class Player:
     destiny_level: int = 0
     sect_id: Optional[str] = None
     primary_method_id: Optional[str] = None
+    equipped_artifact_id: Optional[str] = None
     meditation_started_at: Optional[str] = None
     meditation_until: Optional[str] = None
     meditation_minutes: int = 0

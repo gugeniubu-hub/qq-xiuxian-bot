@@ -119,6 +119,75 @@ DESTINY_DESCRIPTIONS: dict[DestinyType, str] = {
     DestinyType.TURNFATE: "坏运更难压到底，逆风时更容易翻盘。",
 }
 
+ARTIFACT_EFFECTS: dict[str, dict[str, object]] = {
+    "artifact-iron-sword": {
+        "brief": "斗法攻势+6，招式伤势略高",
+        "duel": 6,
+        "attack": 3,
+        "practice": 0.00,
+        "insight": 0.00,
+        "breakthrough": 0,
+    },
+    "artifact-cloud-bell": {
+        "brief": "修炼+3%，悟道+2%，斗法守势+3",
+        "duel": 3,
+        "guard": 2,
+        "practice": 0.03,
+        "insight": 0.02,
+        "breakthrough": 1,
+    },
+    "artifact-flame-seal": {
+        "brief": "斗法攻势+8，火系招式更烈",
+        "duel": 8,
+        "attack": 4,
+        "burn": 2,
+        "practice": 0.01,
+        "insight": 0.00,
+        "breakthrough": 2,
+        "affinity": Affinity.FIRE,
+    },
+    "artifact-wind-boots": {
+        "brief": "斗法先机+5，历练略顺",
+        "duel": 4,
+        "speed": 5,
+        "adventure": 3,
+        "practice": 0.01,
+        "insight": 0.01,
+        "breakthrough": 0,
+        "affinity": Affinity.WIND,
+    },
+    "artifact-thunder-banner": {
+        "brief": "斗法攻势+7，雷系迟滞更强",
+        "duel": 7,
+        "attack": 2,
+        "stagger": 2,
+        "practice": 0.00,
+        "insight": 0.01,
+        "breakthrough": 2,
+        "affinity": Affinity.THUNDER,
+    },
+    "artifact-mirror-jade": {
+        "brief": "悟道+5%，冲关+3，斗法稳心",
+        "duel": 2,
+        "guard": 2,
+        "focus": 2,
+        "practice": 0.02,
+        "insight": 0.05,
+        "breakthrough": 3,
+    },
+}
+
+ARTIFACT_DROP_TABLE: dict[Affinity, tuple[str, ...]] = {
+    Affinity.METAL: ("artifact-iron-sword", "artifact-cloud-bell"),
+    Affinity.WOOD: ("artifact-cloud-bell", "artifact-mirror-jade"),
+    Affinity.WATER: ("artifact-cloud-bell", "artifact-mirror-jade"),
+    Affinity.FIRE: ("artifact-flame-seal", "artifact-iron-sword"),
+    Affinity.EARTH: ("artifact-cloud-bell", "artifact-iron-sword"),
+    Affinity.WIND: ("artifact-wind-boots", "artifact-cloud-bell"),
+    Affinity.THUNDER: ("artifact-thunder-banner", "artifact-wind-boots"),
+    Affinity.VOID: ("artifact-mirror-jade", "artifact-thunder-banner"),
+}
+
 MASTERY_TITLES: tuple[tuple[int, str], ...] = (
     (0, "初窥"),
     (80, "小成"),
@@ -558,6 +627,18 @@ class ConsumeItemResult:
 
 
 @dataclass(slots=True)
+class ArtifactEquipResult:
+    artifact_name: str
+    rarity: str
+    effect_brief: str
+
+
+@dataclass(slots=True)
+class PlayerPanelResult:
+    lines: list[str]
+
+
+@dataclass(slots=True)
 class MethodInsightResult:
     method_name: str
     mastery_gain: int
@@ -655,14 +736,14 @@ def _realm_cap_brief(player: Player) -> str:
 def _root_rarity_brief(player: Player) -> str:
     rare_bias = AFFINITY_RARE_OFFSETS.get(player.root_affinity, 0)
     if player.root_affinity == Affinity.VOID:
-        return "太虚异灵根"
+        return "虚灵根"
     if player.root_affinity == Affinity.THUNDER:
-        return "天雷异灵根"
+        return "雷灵根"
     if player.root_affinity == Affinity.WIND:
-        return "罡风异灵根"
+        return "风灵根"
     if rare_bias > 0:
-        return "偏异灵根"
-    return "五行正灵根"
+        return "异灵根"
+    return "五行灵根"
 
 
 def _weighted_choice(table: tuple[tuple[int, Any], ...], roll: int | None = None) -> Any:
@@ -958,6 +1039,17 @@ def _root_loot_choice(
     return random.choice(weighted)
 
 
+def _artifact_drop_choice(player: Player) -> str:
+    options = list(ARTIFACT_DROP_TABLE.get(player.root_affinity, ("artifact-iron-sword",)))
+    if player.rebirth_count >= 2:
+        options.append(options[-1])
+    if player.root_trait == RootTrait.WANDERING:
+        options.append("artifact-wind-boots")
+    if player.root_trait == RootTrait.EMBER:
+        options.append("artifact-thunder-banner")
+    return random.choice(options)
+
+
 def _root_affinity_duel_bonus(player: Player) -> int:
     if player.root_affinity == Affinity.THUNDER:
         return 6
@@ -1181,6 +1273,9 @@ def _training_multiplier(player: Player, method: dict[str, object] | None) -> fl
     bonus = _root_training_bonus(player)
     if method is not None:
         bonus += float(method.get("practice_total", 0.0))
+    bonus += _artifact_float(player, "practice")
+    if _artifact_affinity_match(player):
+        bonus += 0.01
     return bonus
 
 
@@ -1188,6 +1283,9 @@ def _insight_multiplier(player: Player, method: dict[str, object] | None) -> flo
     bonus = _root_insight_total(player)
     if method is not None:
         bonus += float(method.get("insight_total", 0.0))
+    bonus += _artifact_float(player, "insight")
+    if _artifact_affinity_match(player):
+        bonus += 0.01
     return bonus
 
 
@@ -1294,6 +1392,36 @@ def _find_alchemy_recipe(recipe_name: str) -> dict[str, Any] | None:
     return None
 
 
+def _artifact_effect(player: Player | None) -> dict[str, object]:
+    if player is None or player.equipped_artifact_id is None:
+        return {}
+    return dict(ARTIFACT_EFFECTS.get(player.equipped_artifact_id, {}))
+
+
+def _artifact_value(player: Player | None, key: str, default: int = 0) -> int:
+    return int(_artifact_effect(player).get(key, default))
+
+
+def _artifact_float(player: Player | None, key: str, default: float = 0.0) -> float:
+    return float(_artifact_effect(player).get(key, default))
+
+
+def _artifact_affinity_match(player: Player | None) -> bool:
+    if player is None:
+        return False
+    effect = _artifact_effect(player)
+    affinity = effect.get("affinity")
+    return affinity is not None and affinity == player.root_affinity
+
+
+def _artifact_brief(player: Player | None) -> str | None:
+    effect = _artifact_effect(player)
+    brief = effect.get("brief")
+    if brief is None:
+        return None
+    return str(brief)
+
+
 def _realm_power(player: Player) -> int:
     return realm_index(player.realm) * 18 + max(0, player.cultivation // 140)
 
@@ -1316,6 +1444,13 @@ def _duel_style_bonus(method: dict[str, object] | None) -> int:
         bonus += 7
     elif method_type == MethodType.REBIRTH:
         bonus += 5
+    return bonus
+
+
+def _artifact_duel_bonus(player: Player) -> int:
+    bonus = _artifact_value(player, "duel")
+    if _artifact_affinity_match(player):
+        bonus += 2
     return bonus
 
 
@@ -1371,6 +1506,7 @@ def _duel_move_table(player: Player, method: dict[str, object] | None) -> list[d
     method_type = None if method is None else MethodType(str(method["method_type"]))
     affinity = _duel_method_affinity(player, method)
     resonance = _duel_resonance(player, method)
+    artifact = _artifact_effect(player)
     moves: list[dict[str, object]] = [
         {
             "name": "运转灵机",
@@ -1529,6 +1665,24 @@ def _duel_move_table(player: Player, method: dict[str, object] | None) -> list[d
         moves[2]["effect_power"] = int(moves[2]["effect_power"]) + 1
     elif player.destiny_type == DestinyType.TURNFATE:
         moves[0]["effect_power"] = int(moves[0]["effect_power"]) + 1 + player.destiny_level // 3
+
+    attack_bonus = int(artifact.get("attack", 0))
+    guard_bonus = int(artifact.get("guard", 0))
+    speed_bonus = int(artifact.get("speed", 0))
+    if attack_bonus:
+        moves[1]["power"] = int(moves[1]["power"]) + attack_bonus
+    if guard_bonus:
+        moves[0]["guard"] = int(moves[0]["guard"]) + max(1, guard_bonus // 2)
+        moves[2]["guard"] = int(moves[2]["guard"]) + guard_bonus
+    if speed_bonus:
+        moves[0]["speed"] = int(moves[0]["speed"]) + speed_bonus
+        moves[1]["speed"] = int(moves[1]["speed"]) + max(1, speed_bonus // 2)
+    if "burn" in artifact and str(moves[1]["effect"]) == "burn":
+        moves[1]["effect_power"] = int(moves[1]["effect_power"]) + int(artifact["burn"])
+    if "stagger" in artifact and str(moves[1]["effect"]) == "stagger":
+        moves[1]["effect_power"] = int(moves[1]["effect_power"]) + int(artifact["stagger"])
+    if "focus" in artifact:
+        moves[0]["effect_power"] = int(moves[0]["effect_power"]) + int(artifact["focus"])
     return moves
 
 
@@ -1563,6 +1717,9 @@ def _duel_initial_state(player: Player, method: dict[str, object] | None) -> dic
         state["shield"] += 1 + player.destiny_level // 2
     elif player.destiny_type == DestinyType.TURNFATE:
         state["echo"] += 1 + player.destiny_level // 4
+    state["focus"] += _artifact_value(player, "focus")
+    state["shield"] += _artifact_value(player, "guard") // 2
+    state["haste"] += max(0, _artifact_value(player, "speed") // 2)
     return state
 
 
@@ -1819,6 +1976,7 @@ def _duel_total(player: Player, method: dict[str, object] | None, roll_value: in
         total += 5
     if player.root_trait == RootTrait.WANDERING:
         total += 3
+    total += _artifact_duel_bonus(player)
     return total
 
 
@@ -2257,6 +2415,68 @@ async def list_inventory(user_id: str) -> list[dict[str, object]]:
     return await get_repository().list_inventory(user_id)
 
 
+async def list_artifacts(user_id: str) -> list[dict[str, object]]:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        return []
+    artifacts = await repo.list_player_artifacts(user_id)
+    for artifact in artifacts:
+        effect = ARTIFACT_EFFECTS.get(str(artifact["item_id"]), {})
+        artifact["effect_brief"] = str(effect.get("brief", artifact["description"]))
+    return artifacts
+
+
+async def equip_artifact(user_id: str, artifact_name: str) -> ArtifactEquipResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+    artifact = await repo.get_player_artifact_by_name(user_id, artifact_name.strip())
+    if artifact is None:
+        raise GameError("artifact_not_found")
+    await repo.set_equipped_artifact(user_id, str(artifact["item_id"]))
+    effect = ARTIFACT_EFFECTS.get(str(artifact["item_id"]), {})
+    return ArtifactEquipResult(
+        artifact_name=str(artifact["name"]),
+        rarity=str(artifact["rarity"]),
+        effect_brief=str(effect.get("brief", artifact["description"])),
+    )
+
+
+async def get_player_panel(user_id: str) -> PlayerPanelResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+    methods = await _load_methods(repo, player)
+    primary_method = _primary_method(player, methods)
+    method_summary = "未定主修" if primary_method is None else (
+        f"{primary_method['name']} [{primary_method['mastery_title']}]"
+    )
+    artifact = await repo.get_equipped_artifact(user_id)
+    artifact_line = "未装备"
+    if artifact is not None:
+        brief = ARTIFACT_EFFECTS.get(str(artifact["item_id"]), {}).get("brief", artifact["description"])
+        artifact_line = f"{artifact['name']} [{artifact['rarity']}] | {brief}"
+    lines = [
+        f"道号: {player.nickname}",
+        f"灵根: {player.root_type.value}·{player.root_affinity.value}灵根 | 纯度 {player.root_purity}",
+        f"根性: {player.root_temperament.value} | 特质: {player.root_trait.value}",
+        f"根骨走势: {_root_growth_brief(player)}",
+        f"境界: {player.realm.value} | 此生上限: {_effective_max_realm(player).value}",
+        f"修为: {player.cultivation}",
+        f"悟性: {player.comprehension} | 道悟: {player.insight} | 冲关底蕴: {player.breakthrough_ready}",
+        f"命格: {_destiny_brief(player)}",
+        f"主修: {method_summary}",
+        f"法宝: {artifact_line}",
+        f"灵石: {player.spirit_stones} | 福缘: {player.fortune} | 体力: {player.stamina}",
+        f"寿元: {player.age}/{player.lifespan}",
+        f"轮回: {player.rebirth_count} 转 | 前尘点: {player.legacy_points} | 轮回印记: {player.soul_marks}",
+    ]
+    return PlayerPanelResult(lines=lines)
+
+
 async def sign_in(user_id: str) -> SignInResult:
     repo = get_repository()
     player = await repo.get_player(user_id)
@@ -2411,6 +2631,8 @@ async def adventure(user_id: str) -> AdventureResult:
             item_id = "longevity-fruit"
         elif luck_draw < 0.90:
             item_id = _root_loot_choice(player, ("flame-sand", "moon-dust"))
+        elif luck_draw < 0.97 and player.rebirth_count >= 1:
+            item_id = _artifact_drop_choice(player)
         else:
             item_id = "qigather"
     else:
@@ -2421,10 +2643,13 @@ async def adventure(user_id: str) -> AdventureResult:
             message = "你闯入了一处轮回者才可感知的遗迹夹层，古老气息扑面而来。"
         else:
             message = "你仰见星芒坠落，顺着灵机追索而去，竟得一桩超常机缘。"
-        item_id = "method-fragment" if player.rebirth_count < 2 else _root_loot_choice(
-            player,
-            ("method-fragment", "longevity-fruit", "rebirth-mark", "marrow-jade"),
-        )
+        if player.rebirth_count >= 2 and random.random() < 0.28:
+            item_id = _artifact_drop_choice(player)
+        else:
+            item_id = "method-fragment" if player.rebirth_count < 2 else _root_loot_choice(
+                player,
+                ("method-fragment", "longevity-fruit", "rebirth-mark", "marrow-jade"),
+            )
 
     reward_multiplier = _lifespan_reward_multiplier(player)
     if cultivation_gain > 0:
@@ -2563,7 +2788,10 @@ async def encounter(user_id: str) -> EncounterResult:
         fortune_delta = 3
         insight_delta = random.randint(3, 6)
         if player.rebirth_count >= 2:
-            item_id = random.choice(["rebirth-mark", "longevity-fruit", "method-fragment", "marrow-jade"])
+            if random.random() < 0.32:
+                item_id = _artifact_drop_choice(player)
+            else:
+                item_id = random.choice(["rebirth-mark", "longevity-fruit", "method-fragment", "marrow-jade"])
             message = "虚市裂缝在你面前一闪而过，你从中换得了一件极罕见的东西。"
         else:
             item_id = random.choice(["longevity-fruit", "method-fragment", "moon-dust"])
@@ -3297,6 +3525,12 @@ async def duel(user_id: str, target: str) -> DuelResult:
 
     mastery_gain = 2 + (1 if abs(attacker_total - defender_total) >= 22 else 0)
     await _apply_method_mastery(repo, winner.user_id, winner_method, mastery_gain)
+    if winner.equipped_artifact_id is not None:
+        await repo.add_artifact_mastery(
+            winner.user_id,
+            winner.equipped_artifact_id,
+            1 + (1 if abs(attacker_total - defender_total) >= 20 else 0),
+        )
     await repo.record_adventure(
         winner.user_id,
         action_type="duel",

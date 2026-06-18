@@ -26,15 +26,18 @@ from xianbot.services import (
     create_market_listing,
     create_player_if_missing,
     duel,
+    equip_artifact,
     encounter,
     end_meditation,
     explore_ancient_trial,
+    get_player_panel,
     get_player_methods,
     get_player_status,
     get_rankings,
     get_today_world_event,
     get_today_world_state,
     join_sect,
+    list_artifacts,
     list_inventory,
     list_market,
     list_sects_for_player,
@@ -62,6 +65,8 @@ join_sect_cmd = on_command("加入宗门")
 methods_cmd = on_command("我的功法", aliases={"宗门传承"})
 primary_method_cmd = on_command("主修功法", aliases={"切换主修"})
 inventory_cmd = on_command("背包")
+artifacts_cmd = on_command("我的法宝", aliases={"法宝"})
+equip_artifact_cmd = on_command("装备法宝")
 adventure_cmd = on_command("历练")
 encounter_cmd = on_command("奇遇")
 breakthrough_cmd = on_command("突破")
@@ -196,34 +201,13 @@ async def handle_enter_path(event: MessageEvent) -> None:
 
 @status_cmd.handle()
 async def handle_status(event: MessageEvent) -> None:
-    user_id = event.get_user_id()
-    player = await get_player_status(user_id)
-    if player is None:
-        await status_cmd.finish("你还未入道，发送“入道”开始。")
-    methods = await get_player_methods(user_id)
-    primary_method = next((method for method in methods if bool(method.get("equipped"))), None)
-    method_summary = "未定主修" if primary_method is None else (
-        f"{primary_method['name']} [{primary_method['mastery_title']}]"
-    )
-    await status_cmd.finish(
-        "\n".join(
-            [
-                f"道号: {player.nickname}",
-                f"灵根: {player.root_type.value}·{player.root_affinity.value}系 | 纯度 {player.root_purity}",
-                f"根性: {player.root_temperament.value} | 特质: {player.root_trait.value}",
-                f"根骨走势: {_root_growth_brief(player)}",
-                f"境界: {player.realm.value}",
-                f"此生上限: {_effective_max_realm(player).value}",
-                f"修为: {player.cultivation}",
-                f"悟性: {player.comprehension} | 道悟: {player.insight} | 冲关底蕴: {player.breakthrough_ready}",
-                f"命格: {player.destiny_type.value + '·' + str(player.destiny_level) + '重' if player.destiny_type and player.destiny_level > 0 else '二转后显化'}",
-                f"主修: {method_summary}",
-                f"灵石: {player.spirit_stones} | 福缘: {player.fortune} | 体力: {player.stamina}",
-                f"寿元: {player.age}/{player.lifespan}",
-                f"轮回: {player.rebirth_count} 转 | 前尘点: {player.legacy_points} | 轮回印记: {player.soul_marks}",
-            ]
-        )
-    )
+    try:
+        panel = await get_player_panel(event.get_user_id())
+    except GameError as exc:
+        if str(exc) == "player_not_found":
+            await status_cmd.finish("你还未入道，发送“入道”开始。")
+        raise
+    await status_cmd.finish("\n".join(panel.lines))
 
 
 @destiny_cmd.handle()
@@ -391,6 +375,43 @@ async def handle_inventory(event: MessageEvent) -> None:
     for item in items:
         lines.append(f"- {item['name']} x{item['quantity']} [{item['item_type']}/{item['rarity']}]")
     await inventory_cmd.finish("\n".join(lines))
+
+
+@artifacts_cmd.handle()
+async def handle_artifacts(event: MessageEvent) -> None:
+    player = await get_player_status(event.get_user_id())
+    if player is None:
+        await artifacts_cmd.finish("你还未入道，发送“入道”开始。")
+    artifacts = await list_artifacts(event.get_user_id())
+    if not artifacts:
+        await artifacts_cmd.finish("你还没有法宝。多去历练、奇遇，中后期机缘会出法宝。")
+    lines = ["当前法宝:"]
+    for artifact in artifacts:
+        mark = " [已装备]" if bool(artifact.get("equipped")) else ""
+        lines.append(
+            f"- {artifact['name']}{mark} [{artifact['rarity']}] | 熟练 {artifact['mastery']}"
+        )
+        lines.append(f"  {artifact['effect_brief']}")
+    await artifacts_cmd.finish("\n".join(lines))
+
+
+@equip_artifact_cmd.handle()
+async def handle_equip_artifact(event: MessageEvent, args: Message = CommandArg()) -> None:
+    artifact_name = args.extract_plain_text().strip()
+    if not artifact_name:
+        await equip_artifact_cmd.finish("格式：装备法宝 法宝名")
+    try:
+        result = await equip_artifact(event.get_user_id(), artifact_name)
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await equip_artifact_cmd.finish("你还未入道，发送“入道”开始。")
+        if reason == "artifact_not_found":
+            await equip_artifact_cmd.finish("未找到这件法宝，先发送“我的法宝”查看。")
+        raise
+    await equip_artifact_cmd.finish(
+        f"已装备法宝《{result.artifact_name}》[{result.rarity}]。{result.effect_brief}"
+    )
 
 
 @adventure_cmd.handle()
