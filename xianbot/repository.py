@@ -6,6 +6,7 @@ from typing import Any
 
 import aiosqlite
 
+from xianbot.config import get_settings
 from xianbot.database import resolve_sqlite_path
 from xianbot.domain import (
     Affinity,
@@ -28,8 +29,21 @@ class GameRepository:
     async def _connect(self) -> AsyncIterator[aiosqlite.Connection]:
         connection = await aiosqlite.connect(self.db_path, timeout=30)
         connection.row_factory = aiosqlite.Row
+        settings = get_settings()
+        cache_size_pages = -max(1024, int(settings.sqlite_cache_size_kb))
+        mmap_size_bytes = max(0, int(settings.sqlite_mmap_size_mb)) * 1024 * 1024
+        synchronous = str(settings.sqlite_synchronous).upper()
+        temp_store = str(settings.sqlite_temp_store).upper()
+        journal_size_limit_bytes = max(0, int(settings.sqlite_journal_size_limit_mb)) * 1024 * 1024
+
         await connection.execute("PRAGMA foreign_keys=ON")
-        await connection.execute("PRAGMA busy_timeout = 30000")
+        await connection.execute(f"PRAGMA synchronous={synchronous}")
+        await connection.execute(f"PRAGMA busy_timeout = {max(1000, int(settings.sqlite_busy_timeout_ms))}")
+        await connection.execute(f"PRAGMA cache_size = {cache_size_pages}")
+        await connection.execute(f"PRAGMA temp_store = {temp_store}")
+        await connection.execute(f"PRAGMA wal_autocheckpoint = {max(100, int(settings.sqlite_wal_autocheckpoint))}")
+        await connection.execute(f"PRAGMA journal_size_limit = {journal_size_limit_bytes}")
+        await connection.execute(f"PRAGMA mmap_size = {mmap_size_bytes}")
         try:
             yield connection
         finally:
@@ -1734,3 +1748,133 @@ class GameRepository:
                 [(user_id, unlock_key) for unlock_key in unlock_keys],
             )
             await db.commit()
+
+    async def run_maintenance(
+        self,
+        *,
+        action_log_days: int,
+        action_log_keep_latest_per_user: int,
+        signin_days: int,
+        sold_market_days: int,
+        world_days: int,
+        cooldown_grace_days: int,
+        rebirth_log_days: int,
+    ) -> dict[str, int]:
+        async with self._connect() as db:
+            stats = {
+                "adventure_logs_deleted": 0,
+                "daily_signins_deleted": 0,
+                "market_listings_deleted": 0,
+                "world_states_deleted": 0,
+                "world_events_deleted": 0,
+                "world_event_contributions_deleted": 0,
+                "cooldowns_deleted": 0,
+                "rebirth_logs_deleted": 0,
+            }
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+
+                if action_log_days > 0:
+                    cursor = await db.execute(
+                        """
+                        DELETE FROM adventure_logs
+                        WHERE created_at < datetime('now', '-' || ? || ' days')
+                          AND id NOT IN (
+                            SELECT id
+                            FROM (
+                              SELECT id,
+                                ROW_NUMBER() OVER (
+                                  PARTITION BY user_id
+                                  ORDER BY id DESC
+                                ) AS rn
+                              FROM adventure_logs
+                            )
+                            WHERE rn <= ?
+                          )
+                        """,
+                        (action_log_days, max(1, action_log_keep_latest_per_user)),
+                    )
+                    stats["adventure_logs_deleted"] = cursor.rowcount or 0
+
+                if signin_days > 0:
+                    cursor = await db.execute(
+                        """
+                        DELETE FROM daily_signins
+                        WHERE sign_date < date('now', '-' || ? || ' days')
+                        """,
+                        (signin_days,),
+                    )
+                    stats["daily_signins_deleted"] = cursor.rowcount or 0
+
+                if sold_market_days > 0:
+                    cursor = await db.execute(
+                        """
+                        DELETE FROM market_listings
+                        WHERE status = 'sold'
+                          AND sold_at IS NOT NULL
+                          AND sold_at < datetime('now', '-' || ? || ' days')
+                        """,
+                        (sold_market_days,),
+                    )
+                    stats["market_listings_deleted"] = cursor.rowcount or 0
+
+                if world_days > 0:
+                    contrib_cursor = await db.execute(
+                        """
+                        DELETE FROM world_event_contributions
+                        WHERE event_date < date('now', '-' || ? || ' days')
+                        """,
+                        (world_days,),
+                    )
+                    stats["world_event_contributions_deleted"] = contrib_cursor.rowcount or 0
+
+                    event_cursor = await db.execute(
+                        """
+                        DELETE FROM world_events
+                        WHERE event_date < date('now', '-' || ? || ' days')
+                        """,
+                        (world_days,),
+                    )
+                    stats["world_events_deleted"] = event_cursor.rowcount or 0
+
+                    state_cursor = await db.execute(
+                        """
+                        DELETE FROM world_states
+                        WHERE state_date < date('now', '-' || ? || ' days')
+                        """,
+                        (world_days,),
+                    )
+                    stats["world_states_deleted"] = state_cursor.rowcount or 0
+
+                if cooldown_grace_days > 0:
+                    cursor = await db.execute(
+                        """
+                        DELETE FROM player_action_cooldowns
+                        WHERE available_at < datetime('now', '-' || ? || ' days')
+                        """,
+                        (cooldown_grace_days,),
+                    )
+                    stats["cooldowns_deleted"] = cursor.rowcount or 0
+
+                if rebirth_log_days > 0:
+                    cursor = await db.execute(
+                        """
+                        DELETE FROM rebirth_logs
+                        WHERE created_at < datetime('now', '-' || ? || ' days')
+                        """,
+                        (rebirth_log_days,),
+                    )
+                    stats["rebirth_logs_deleted"] = cursor.rowcount or 0
+
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+
+            await db.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            await db.execute("PRAGMA optimize")
+            return stats
+
+    async def vacuum(self) -> None:
+        async with self._connect() as db:
+            await db.execute("VACUUM")

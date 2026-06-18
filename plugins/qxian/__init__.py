@@ -1,9 +1,12 @@
-from nonebot import get_driver, on_command
+import asyncio
+
+from nonebot import get_driver, logger, on_command
 from nonebot.adapters.onebot.v11 import Message, MessageEvent
 from nonebot.params import CommandArg
 
 from xianbot.config import get_settings
 from xianbot.database import initialize_database
+from xianbot.repository import GameRepository
 from xianbot.game_text import (
     DESIGN_SUMMARY_TEXT,
     HELP_TEXT,
@@ -51,6 +54,7 @@ from xianbot.services import (
 
 driver = get_driver()
 settings = get_settings()
+maintenance_task: asyncio.Task[None] | None = None
 
 help_cmd = on_command("帮助", aliases={"修仙帮助", "仙途帮助"})
 design_cmd = on_command("设计", aliases={"玩法设计", "初版设计"})
@@ -93,6 +97,51 @@ world_event_claim_cmd = on_command("领取事件", aliases={"领取天命", "事
 @driver.on_startup
 async def startup() -> None:
     initialize_database(settings.database_url)
+    _start_maintenance_task()
+
+
+@driver.on_shutdown
+async def shutdown() -> None:
+    global maintenance_task
+    if maintenance_task is None:
+        return
+    maintenance_task.cancel()
+    try:
+        await maintenance_task
+    except asyncio.CancelledError:
+        pass
+    maintenance_task = None
+
+
+def _start_maintenance_task() -> None:
+    global maintenance_task
+    interval = max(300, settings.maintenance_interval_seconds)
+    if maintenance_task is not None and not maintenance_task.done():
+        return
+    maintenance_task = asyncio.create_task(_maintenance_loop(interval))
+
+
+async def _maintenance_loop(interval_seconds: int) -> None:
+    repo = GameRepository(settings.database_url)
+    while True:
+        try:
+            stats = await repo.run_maintenance(
+                action_log_days=settings.cleanup_action_log_days,
+                action_log_keep_latest_per_user=settings.cleanup_action_log_keep_latest_per_user,
+                signin_days=settings.cleanup_signin_days,
+                sold_market_days=settings.cleanup_sold_market_days,
+                world_days=settings.cleanup_world_days,
+                cooldown_grace_days=settings.cleanup_cooldown_grace_days,
+                rebirth_log_days=settings.cleanup_rebirth_log_days,
+            )
+            deleted_total = sum(stats.values())
+            if deleted_total > 0:
+                logger.info("qxian maintenance cleaned {} rows: {}", deleted_total, stats)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("qxian maintenance loop failed")
+        await asyncio.sleep(interval_seconds)
 
 
 def _meditation_usage() -> str:

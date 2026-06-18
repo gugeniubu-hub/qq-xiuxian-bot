@@ -39,6 +39,163 @@ from xianbot.services import (
 )
 
 
+def test_repository_maintenance_cleans_old_records_but_keeps_recent_guardrails(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian_maintenance.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        repo = GameRepository(get_settings().database_url)
+        await create_player_if_missing("91001", "janitor")
+
+        async with repo._connect() as db:
+            await db.executemany(
+                """
+                INSERT INTO adventure_logs (
+                  user_id, action_type, roll_value, outcome,
+                  reward_spirit_stones, reward_cultivation, reward_item_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    ("91001", "adventure", 10, "old-1", 0, 0, None, "2024-01-01 00:00:00"),
+                    ("91001", "adventure", 20, "old-2", 0, 0, None, "2024-01-02 00:00:00"),
+                    ("91001", "adventure", 30, "new-1", 0, 0, None, "2099-01-01 00:00:00"),
+                    ("91001", "adventure", 40, "new-2", 0, 0, None, "2099-01-02 00:00:00"),
+                ],
+            )
+            await db.execute(
+                """
+                INSERT INTO daily_signins (user_id, sign_date, base_reward, pool_reward, fortune_roll)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("91001", "2024-01-01", 1, 0, 1),
+            )
+            await db.execute(
+                """
+                INSERT INTO market_listings (
+                  seller_user_id, item_id, quantity, unit_price, status, buyer_user_id, created_at, sold_at
+                ) VALUES (?, ?, ?, ?, 'sold', ?, ?, ?)
+                """,
+                ("91001", "spirit-herb", 1, 10, "91002", "2024-01-01 00:00:00", "2024-01-03 00:00:00"),
+            )
+            await db.execute(
+                """
+                INSERT INTO world_states (
+                  state_date, title, description, adventure_bonus, meditation_bonus,
+                  encounter_bonus, fortune_bonus, lifespan_bonus
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("2024-01-01", "old state", "old", 0, 0, 0, 0, 0),
+            )
+            await db.execute(
+                """
+                INSERT INTO world_events (
+                  event_date, event_key, title, description, objective,
+                  target_progress, current_progress, reward_spirit_stones,
+                  reward_cultivation, reward_insight, reward_item_id, reward_item_quantity,
+                  bonus_text, participation_hint, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "2024-01-01",
+                    "legacy-event",
+                    "old event",
+                    "old desc",
+                    "old objective",
+                    10,
+                    10,
+                    0,
+                    0,
+                    0,
+                    None,
+                    0,
+                    "",
+                    "",
+                    "2024-01-01 00:00:00",
+                ),
+            )
+            await db.execute(
+                """
+                INSERT INTO world_event_contributions (event_date, user_id, contribution, claimed, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("2024-01-01", "91001", 3, 1, "2024-01-01 00:00:00"),
+            )
+            await db.execute(
+                """
+                INSERT INTO player_action_cooldowns (user_id, action_type, available_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("91001", "adventure", "2024-01-01 00:00:00", "2024-01-01 00:00:00"),
+            )
+            await db.execute(
+                """
+                INSERT INTO rebirth_logs (
+                  user_id, rebirth_count, previous_realm, legacy_points_gained,
+                  soul_marks_consumed, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("91001", 1, Realm.FOUNDATION_4.value, 2, 1, "2024-01-01 00:00:00"),
+            )
+            await db.commit()
+
+        stats = await repo.run_maintenance(
+            action_log_days=30,
+            action_log_keep_latest_per_user=2,
+            signin_days=60,
+            sold_market_days=30,
+            world_days=45,
+            cooldown_grace_days=3,
+            rebirth_log_days=365,
+        )
+
+        assert stats["adventure_logs_deleted"] == 2
+        assert stats["daily_signins_deleted"] == 1
+        assert stats["market_listings_deleted"] == 1
+        assert stats["world_states_deleted"] == 1
+        assert stats["world_events_deleted"] == 1
+        assert stats["world_event_contributions_deleted"] == 1
+        assert stats["cooldowns_deleted"] == 1
+        assert stats["rebirth_logs_deleted"] == 1
+
+        async with repo._connect() as db:
+            remaining_logs = await repo._fetchall(
+                db,
+                "SELECT outcome FROM adventure_logs WHERE user_id = ? ORDER BY id ASC",
+                ("91001",),
+            )
+            remaining_outcomes = [str(row["outcome"]) for row in remaining_logs]
+            assert remaining_outcomes == ["new-1", "new-2"]
+
+            signin_count = await repo._fetchone(db, "SELECT COUNT(*) AS cnt FROM daily_signins", ())
+            market_count = await repo._fetchone(db, "SELECT COUNT(*) AS cnt FROM market_listings", ())
+            state_count = await repo._fetchone(db, "SELECT COUNT(*) AS cnt FROM world_states", ())
+            event_count = await repo._fetchone(db, "SELECT COUNT(*) AS cnt FROM world_events", ())
+            contribution_count = await repo._fetchone(
+                db,
+                "SELECT COUNT(*) AS cnt FROM world_event_contributions",
+                (),
+            )
+            cooldown_count = await repo._fetchone(
+                db,
+                "SELECT COUNT(*) AS cnt FROM player_action_cooldowns",
+                (),
+            )
+            rebirth_count = await repo._fetchone(db, "SELECT COUNT(*) AS cnt FROM rebirth_logs", ())
+
+            assert int(signin_count["cnt"]) == 0
+            assert int(market_count["cnt"]) == 0
+            assert int(state_count["cnt"]) == 0
+            assert int(event_count["cnt"]) == 0
+            assert int(contribution_count["cnt"]) == 0
+            assert int(cooldown_count["cnt"]) == 0
+            assert int(rebirth_count["cnt"]) == 0
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
 def test_create_player_and_sign_in(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "qxian.db"
     monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")

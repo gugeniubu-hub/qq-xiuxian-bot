@@ -4,6 +4,8 @@ from pathlib import Path
 import sqlite3
 from urllib.parse import urlparse
 
+from xianbot.config import get_settings
+
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS players (
@@ -226,6 +228,33 @@ CREATE TABLE IF NOT EXISTS player_action_cooldowns (
   PRIMARY KEY (user_id, action_type),
   FOREIGN KEY (user_id) REFERENCES players(user_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_adventure_logs_user_id_id
+ON adventure_logs (user_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_adventure_logs_created_at
+ON adventure_logs (created_at);
+
+CREATE INDEX IF NOT EXISTS idx_rebirth_logs_created_at
+ON rebirth_logs (created_at);
+
+CREATE INDEX IF NOT EXISTS idx_market_listings_status_created_at
+ON market_listings (status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_daily_signins_sign_date
+ON daily_signins (sign_date);
+
+CREATE INDEX IF NOT EXISTS idx_world_states_state_date
+ON world_states (state_date);
+
+CREATE INDEX IF NOT EXISTS idx_world_events_event_date
+ON world_events (event_date);
+
+CREATE INDEX IF NOT EXISTS idx_world_event_contributions_updated_at
+ON world_event_contributions (updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_player_action_cooldowns_available_at
+ON player_action_cooldowns (available_at);
 """
 
 DEFAULT_SECTS = (
@@ -417,11 +446,9 @@ def resolve_sqlite_path(database_url: str) -> Path:
 
 def initialize_database(database_url: str) -> Path:
     db_path = resolve_sqlite_path(database_url)
+    settings = get_settings()
     with sqlite3.connect(db_path) as connection:
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=NORMAL")
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout = 30000")
+        configure_sqlite_connection(connection, settings)
         connection.executescript(SCHEMA_SQL)
         _ensure_schema_compatibility(connection)
         connection.executemany(
@@ -452,6 +479,37 @@ def initialize_database(database_url: str) -> Path:
         )
         connection.commit()
     return db_path
+
+
+def configure_sqlite_connection(
+    connection: sqlite3.Connection,
+    settings=None,
+    *,
+    include_persistent: bool = True,
+) -> None:
+    if settings is None:
+        settings = get_settings()
+
+    journal_mode = str(settings.sqlite_journal_mode).upper()
+    synchronous = str(settings.sqlite_synchronous).upper()
+    temp_store = str(settings.sqlite_temp_store).upper()
+    cache_size_pages = -max(1024, int(settings.sqlite_cache_size_kb))
+    mmap_size_bytes = max(0, int(settings.sqlite_mmap_size_mb)) * 1024 * 1024
+    journal_size_limit_bytes = max(0, int(settings.sqlite_journal_size_limit_mb)) * 1024 * 1024
+
+    if include_persistent:
+        connection.execute(f"PRAGMA journal_mode={journal_mode}")
+        connection.execute(f"PRAGMA synchronous={synchronous}")
+        connection.execute(
+            f"PRAGMA wal_autocheckpoint = {max(100, int(settings.sqlite_wal_autocheckpoint))}"
+        )
+        connection.execute(f"PRAGMA journal_size_limit = {journal_size_limit_bytes}")
+
+    connection.execute("PRAGMA foreign_keys=ON")
+    connection.execute(f"PRAGMA busy_timeout = {max(1000, int(settings.sqlite_busy_timeout_ms))}")
+    connection.execute(f"PRAGMA cache_size = {cache_size_pages}")
+    connection.execute(f"PRAGMA temp_store = {temp_store}")
+    connection.execute(f"PRAGMA mmap_size = {mmap_size_bytes}")
 
 
 def _ensure_schema_compatibility(connection: sqlite3.Connection) -> None:
