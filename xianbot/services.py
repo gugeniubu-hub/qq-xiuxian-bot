@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -73,9 +74,8 @@ ROOT_AFFINITY_ROLLS: tuple[tuple[int, Affinity], ...] = (
     (48, Affinity.WATER),
     (64, Affinity.FIRE),
     (80, Affinity.EARTH),
-    (90, Affinity.WIND),
-    (98, Affinity.THUNDER),
-    (100, Affinity.VOID),
+    (91, Affinity.WIND),
+    (100, Affinity.THUNDER),
 )
 
 AFFINITY_RARE_OFFSETS: dict[Affinity, int] = {
@@ -440,6 +440,169 @@ ALCHEMY_RECIPES: tuple[dict[str, Any], ...] = (
     },
 )
 
+DAO_NAME_PATTERN = re.compile(r"^[0-9A-Za-z_\-\u4e00-\u9fff·]{2,12}$")
+
+AFFINITY_ROLE_TEXT: dict[Affinity, str] = {
+    Affinity.METAL: "攻伐、法宝、破防",
+    Affinity.WOOD: "修炼、气血、灵材",
+    Affinity.WATER: "悟道、炼丹、续航",
+    Affinity.FIRE: "历练、爆发、冲关",
+    Affinity.EARTH: "护身、稳固、突破",
+    Affinity.WIND: "身法、奇遇、探索",
+    Affinity.THUNDER: "斗法、爆发、天关",
+    Affinity.VOID: "悟道、轮回、古藏",
+}
+
+MAP_AREAS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "qinglan",
+        "name": "青岚山",
+        "aliases": ("青岚山", "青岚", "qinglan"),
+        "required_rebirth_count": 0,
+        "required_realm": Realm.QI_1,
+        "stamina_cost": 12,
+        "risk": 0,
+        "favored_affinities": (Affinity.WOOD, Affinity.WATER),
+        "focus_attribute": "灵力",
+        "focus": "修炼 / 灵材",
+        "reward_brief": "灵草、灵泉水、稳定修为",
+        "description": "入门历练地，灵气平稳，适合新道友攒第一批灵材。",
+        "loot": ("spirit-herb", "clear-dew", "qigather"),
+        "cultivation_range": (80, 150),
+        "spirit_range": (25, 70),
+        "insight_range": (0, 1),
+        "breakthrough_range": (0, 1),
+        "fortune_range": (0, 1),
+        "lifespan_progress": 1,
+    },
+    {
+        "key": "canglang",
+        "name": "沧浪泽",
+        "aliases": ("沧浪泽", "沧浪", "canglang"),
+        "required_rebirth_count": 0,
+        "required_realm": Realm.QI_2,
+        "stamina_cost": 14,
+        "risk": 4,
+        "favored_affinities": (Affinity.WATER, Affinity.WOOD),
+        "focus_attribute": "丹道",
+        "focus": "炼丹 / 悟道",
+        "reward_brief": "灵泉水、月华粉、道悟",
+        "description": "水泽藏药气，炼丹材料与心神感悟更容易一起出现。",
+        "loot": ("clear-dew", "moon-dust", "spirit-herb", "insight-pill"),
+        "cultivation_range": (70, 140),
+        "spirit_range": (35, 85),
+        "insight_range": (1, 3),
+        "breakthrough_range": (0, 1),
+        "fortune_range": (0, 1),
+        "lifespan_progress": 1,
+    },
+    {
+        "key": "chixia",
+        "name": "赤霞岭",
+        "aliases": ("赤霞岭", "赤霞", "chixia"),
+        "required_rebirth_count": 0,
+        "required_realm": Realm.QI_3,
+        "stamina_cost": 16,
+        "risk": 8,
+        "favored_affinities": (Affinity.FIRE, Affinity.THUNDER, Affinity.EARTH),
+        "focus_attribute": "破境",
+        "focus": "冲关 / 高波动",
+        "reward_brief": "赤焰砂、凝元丹、冲关底蕴",
+        "description": "火霞灼烈，收益和风险都更高，适合冲关前补底蕴。",
+        "loot": ("flame-sand", "essence-pill", "qigather", "spirit-herb"),
+        "cultivation_range": (110, 210),
+        "spirit_range": (45, 110),
+        "insight_range": (0, 2),
+        "breakthrough_range": (2, 5),
+        "fortune_range": (0, 1),
+        "lifespan_progress": 2,
+    },
+    {
+        "key": "xuantiegou",
+        "name": "玄铁谷",
+        "aliases": ("玄铁谷", "玄铁", "xuantiegou", "xuantie"),
+        "required_rebirth_count": 0,
+        "required_realm": Realm.QI_4,
+        "stamina_cost": 16,
+        "risk": 7,
+        "favored_affinities": (Affinity.METAL, Affinity.EARTH, Affinity.FIRE),
+        "focus_attribute": "攻伐",
+        "focus": "法宝 / 斗法",
+        "reward_brief": "法宝线索、灵石、残篇",
+        "description": "地火炼铁，容易捡到法宝线索，也需要能打能扛。",
+        "loot": ("method-fragment", "essence-pill", "flame-sand", "artifact-iron-sword"),
+        "cultivation_range": (100, 190),
+        "spirit_range": (70, 150),
+        "insight_range": (0, 2),
+        "breakthrough_range": (1, 3),
+        "fortune_range": (0, 1),
+        "lifespan_progress": 2,
+    },
+    {
+        "key": "luanfeng",
+        "name": "乱风原",
+        "aliases": ("乱风原", "乱风", "luanfeng"),
+        "required_rebirth_count": 0,
+        "required_realm": Realm.FOUNDATION_1,
+        "stamina_cost": 18,
+        "risk": 10,
+        "favored_affinities": (Affinity.WIND, Affinity.WATER, Affinity.WOOD),
+        "focus_attribute": "身法",
+        "focus": "奇遇 / 福缘",
+        "reward_brief": "吐纳残篇、福缘、寿元灵果",
+        "description": "风势无常，身法越好越能抓住一闪而逝的机缘。",
+        "loot": ("method-fragment", "longevity-fruit", "clear-dew", "moon-dust"),
+        "cultivation_range": (120, 230),
+        "spirit_range": (70, 155),
+        "insight_range": (1, 3),
+        "breakthrough_range": (0, 3),
+        "fortune_range": (1, 3),
+        "lifespan_progress": 2,
+    },
+    {
+        "key": "leize",
+        "name": "雷泽",
+        "aliases": ("雷泽", "leize"),
+        "required_rebirth_count": 1,
+        "required_realm": Realm.FOUNDATION_2,
+        "stamina_cost": 20,
+        "risk": 14,
+        "favored_affinities": (Affinity.THUNDER, Affinity.FIRE, Affinity.METAL),
+        "focus_attribute": "破境",
+        "focus": "一转 / 天关",
+        "reward_brief": "轮回印记、洗髓玉、雷系法宝",
+        "description": "一转后才能稳住雷泽天威，是补轮回资源和破境资源的险地。",
+        "loot": ("rebirth-mark", "marrow-jade", "flame-sand", "artifact-thunder-banner"),
+        "cultivation_range": (160, 290),
+        "spirit_range": (90, 190),
+        "insight_range": (1, 4),
+        "breakthrough_range": (3, 7),
+        "fortune_range": (0, 2),
+        "lifespan_progress": 3,
+    },
+    {
+        "key": "taixu",
+        "name": "太虚古域",
+        "aliases": ("太虚古域", "太虚", "古域", "taixu"),
+        "required_rebirth_count": 2,
+        "required_realm": Realm.CORE_1,
+        "stamina_cost": 22,
+        "risk": 18,
+        "favored_affinities": (Affinity.VOID, Affinity.THUNDER, Affinity.WIND),
+        "focus_attribute": "悟道",
+        "focus": "二转 / 古藏",
+        "reward_brief": "古传残篇、洗髓玉、稀有法宝",
+        "description": "二转后方能听见古域回响，适合冲古传承与后期构筑。",
+        "loot": ("method-fragment", "marrow-jade", "rebirth-mark", "artifact-mirror-jade"),
+        "cultivation_range": (190, 340),
+        "spirit_range": (110, 230),
+        "insight_range": (3, 7),
+        "breakthrough_range": (1, 5),
+        "fortune_range": (1, 3),
+        "lifespan_progress": 3,
+    },
+)
+
 
 class GameError(ValueError):
     pass
@@ -641,6 +804,29 @@ class PlayerPanelResult:
 
 
 @dataclass(slots=True)
+class MapExploreResult:
+    area_name: str
+    world_title: str
+    roll_value: int
+    success: bool
+    message: str
+    spirit_stones_delta: int
+    cultivation_delta: int
+    stamina_delta: int
+    insight_delta: int
+    breakthrough_ready_delta: int
+    fortune_delta: int
+    reward_item_name: str | None
+    attribute_used: str
+    attribute_bonus: int
+    root_bonus: int
+    mastery_method_name: str | None = None
+    mastery_gain: int = 0
+    lifespan_notice: str | None = None
+    event_notice: str | None = None
+
+
+@dataclass(slots=True)
 class RecentActionResult:
     lines: list[str]
 
@@ -772,6 +958,7 @@ def _next_step_hint(player: Player) -> str:
 def _recent_action_brief(action_type: str) -> str:
     mapping = {
         "adventure": "历练",
+        "map_explore": "地图探索",
         "encounter": "奇遇",
         "duel": "斗法",
         "ancient_trial": "古藏试炼",
@@ -1313,6 +1500,240 @@ def _root_brief(player: Player) -> str:
 
 def _root_growth_brief(player: Player) -> str:
     return f"{_root_rarity_brief(player)} | 此生上限 { _realm_cap_brief(player) }"
+
+
+def _normalize_dao_name(
+    user_id: str,
+    nickname: str,
+    *,
+    strict: bool = False,
+) -> str:
+    candidate = nickname.strip()
+    if not candidate:
+        candidate = f"道友{user_id[-6:]}" if len(user_id) > 6 else f"道友{user_id}"
+    if DAO_NAME_PATTERN.fullmatch(candidate):
+        if candidate in {"系统", "管理员", "机器人", "群主"}:
+            if strict:
+                raise GameError("reserved_dao_name")
+            fallback = f"道友{user_id[-6:]}" if len(user_id) > 6 else f"道友{user_id}"
+            return fallback[:12]
+        return candidate
+    if strict:
+        raise GameError("invalid_dao_name")
+    fallback = f"道友{user_id[-6:]}" if len(user_id) > 6 else f"道友{user_id}"
+    return fallback[:12]
+
+
+def _percent_text(value: float) -> str:
+    return f"{int(value * 100)}%"
+
+
+def _root_effect_summary(player: Player, method: dict[str, object] | None) -> str:
+    practice = _root_training_bonus(player)
+    breakthrough = _root_breakthrough_total(player)
+    insight = _root_insight_total(player)
+    adventure_bonus = _root_adventure_total(player)
+    if method is not None:
+        practice += float(method.get("practice_total", 0.0))
+        breakthrough += int(method.get("breakthrough_total", 0))
+        insight += float(method.get("insight_total", 0.0))
+        adventure_bonus += int(method.get("adventure_bonus", 0))
+    practice += _artifact_float(player, "practice")
+    insight += _artifact_float(player, "insight")
+    breakthrough += _artifact_value(player, "breakthrough")
+    adventure_bonus += _artifact_value(player, "adventure")
+    return (
+        f"修炼+{_percent_text(practice)} | 冲关+{breakthrough} | "
+        f"悟道+{_percent_text(insight)} | 探索+{adventure_bonus}"
+    )
+
+
+def _method_duel_score(method: dict[str, object] | None) -> int:
+    if method is None:
+        return 0
+    return (
+        _duel_style_bonus(method)
+        + min(16, int(method.get("breakthrough_total", 0)) // 2)
+        + min(12, int(float(method.get("practice_total", 0.0)) * 100 // 3))
+        + min(12, int(method.get("mastery", 0)) // 24)
+    )
+
+
+def _derived_attributes(
+    player: Player,
+    method: dict[str, object] | None = None,
+) -> dict[str, int]:
+    base = 24 + _realm_power(player)
+    root_training = int(_root_training_bonus(player) * 100)
+    root_insight = int(_root_insight_total(player) * 100)
+    root_breakthrough = _root_breakthrough_total(player)
+    root_adventure = _root_adventure_total(player)
+    method_practice = 0 if method is None else int(float(method.get("practice_total", 0.0)) * 100)
+    method_insight = 0 if method is None else int(float(method.get("insight_total", 0.0)) * 100)
+    method_breakthrough = 0 if method is None else int(method.get("breakthrough_total", 0))
+    method_mastery = 0 if method is None else int(method.get("mastery", 0))
+
+    attack_bias = {
+        Affinity.METAL: 9,
+        Affinity.FIRE: 10,
+        Affinity.THUNDER: 13,
+        Affinity.WIND: 5,
+    }.get(player.root_affinity, 0)
+    guard_bias = {
+        Affinity.EARTH: 12,
+        Affinity.WATER: 8,
+        Affinity.WOOD: 7,
+        Affinity.METAL: 5,
+    }.get(player.root_affinity, 0)
+    speed_bias = {
+        Affinity.WIND: 14,
+        Affinity.THUNDER: 7,
+        Affinity.WATER: 5,
+        Affinity.VOID: 5,
+    }.get(player.root_affinity, 0)
+    spirit_bias = {
+        Affinity.WOOD: 12,
+        Affinity.WATER: 8,
+        Affinity.EARTH: 6,
+        Affinity.VOID: 6,
+    }.get(player.root_affinity, 0)
+    insight_bias = {
+        Affinity.WATER: 12,
+        Affinity.VOID: 15,
+        Affinity.WIND: 6,
+        Affinity.WOOD: 5,
+    }.get(player.root_affinity, 0)
+    breakthrough_bias = {
+        Affinity.FIRE: 10,
+        Affinity.THUNDER: 14,
+        Affinity.EARTH: 9,
+        Affinity.METAL: 6,
+    }.get(player.root_affinity, 0)
+    alchemy_bias = {
+        Affinity.WOOD: 10,
+        Affinity.WATER: 12,
+        Affinity.FIRE: 7,
+        Affinity.EARTH: 5,
+        Affinity.VOID: 5,
+    }.get(player.root_affinity, 0)
+
+    return {
+        "攻伐": max(
+            1,
+            base
+            + attack_bias
+            + _root_affinity_duel_bonus(player) * 2
+            + _method_duel_score(method)
+            + _destiny_duel_bonus(player)
+            + _artifact_value(player, "duel")
+            + _artifact_value(player, "attack") * 2
+            + player.rebirth_count * 4,
+        ),
+        "护身": max(
+            1,
+            base
+            + guard_bias
+            + root_breakthrough
+            + _artifact_value(player, "guard") * 2
+            + min(12, player.stamina // 8)
+            + (6 if player.destiny_type == DestinyType.RESILIENT else 0)
+            + (4 if player.root_trait == RootTrait.EVERGREEN else 0),
+        ),
+        "身法": max(
+            1,
+            18
+            + speed_bias
+            + root_adventure
+            + min(18, player.fortune // 2)
+            + min(20, player.stamina // 4)
+            + _artifact_value(player, "speed") * 2
+            + (5 if player.root_trait == RootTrait.WANDERING else 0),
+        ),
+        "灵力": max(
+            1,
+            base
+            + spirit_bias
+            + player.comprehension * 2
+            + root_training
+            + method_practice
+            + _artifact_value(player, "practice")
+            + max(0, player.cultivation // 180),
+        ),
+        "悟道": max(
+            1,
+            player.comprehension
+            + player.insight
+            + insight_bias
+            + root_insight
+            + method_insight
+            + int(_artifact_float(player, "insight") * 100)
+            + player.rebirth_count * 3
+            + (player.destiny_level * 3 if player.destiny_type == DestinyType.WISDOM else 0),
+        ),
+        "破境": max(
+            1,
+            player.breakthrough_ready
+            + breakthrough_bias
+            + root_breakthrough
+            + method_breakthrough
+            + _artifact_value(player, "breakthrough")
+            + min(12, player.insight // 5)
+            + player.rebirth_count * 3,
+        ),
+        "丹道": max(
+            1,
+            player.comprehension
+            + player.insight // 2
+            + alchemy_bias
+            + method_insight // 2
+            + _destiny_alchemy_bonus(player)
+            + (4 if player.root_temperament in {RootTemperament.TRANQUIL, RootTemperament.ENLIGHTENED} else 0)
+            + (4 if player.root_trait == RootTrait.INSIGHTFUL else 0),
+        ),
+    }
+
+
+def _attribute_lines(attributes: dict[str, int]) -> list[str]:
+    return [
+        f"攻伐 {attributes['攻伐']} | 护身 {attributes['护身']} | 身法 {attributes['身法']}",
+        f"灵力 {attributes['灵力']} | 悟道 {attributes['悟道']} | 破境 {attributes['破境']} | 丹道 {attributes['丹道']}",
+    ]
+
+
+def _map_area_by_name(area_name: str) -> dict[str, Any] | None:
+    target = area_name.strip()
+    if not target:
+        return None
+    for area in MAP_AREAS:
+        if target == str(area["name"]) or target in tuple(str(item) for item in area["aliases"]):
+            return dict(area)
+    return None
+
+
+def _map_lock_reason(player: Player, area: dict[str, Any]) -> str | None:
+    required_rebirth_count = int(area["required_rebirth_count"])
+    if player.rebirth_count < required_rebirth_count:
+        return f"需 {required_rebirth_count} 转"
+    required_realm = Realm(str(area["required_realm"]))
+    if realm_index(player.realm) < realm_index(required_realm):
+        return f"需 {required_realm.value}"
+    return None
+
+
+def _map_reward_amount(area: dict[str, Any], key: str, multiplier: float = 1.0) -> int:
+    low, high = area[key]
+    return int(random.randint(int(low), int(high)) * multiplier)
+
+
+def _map_root_bonus(player: Player, area: dict[str, Any]) -> int:
+    bonus = max(0, _root_adventure_total(player) // 2)
+    if player.root_affinity in tuple(area["favored_affinities"]):
+        bonus += 8 + max(0, (player.root_purity - 60) // 8)
+    if player.root_affinity == Affinity.VOID and int(area["required_rebirth_count"]) > 0:
+        bonus += 3
+    if player.root_affinity == Affinity.THUNDER and str(area["key"]) == "leize":
+        bonus += 4
+    return bonus
 
 
 def _lifespan_reward_multiplier(player: Player) -> float:
@@ -2350,11 +2771,21 @@ def _parse_meditation_mode(mode: str | MeditationMode | None) -> MeditationMode:
     return result
 
 
-async def create_player_if_missing(user_id: str, nickname: str) -> tuple[Player, bool]:
+async def create_player_if_missing(
+    user_id: str,
+    nickname: str,
+    *,
+    strict_name: bool = False,
+) -> tuple[Player, bool]:
     repo = get_repository()
     existing = await repo.get_player(user_id)
     if existing is not None:
         return existing, False
+    nickname = _normalize_dao_name(user_id, nickname, strict=strict_name)
+    if strict_name:
+        taken = await repo.get_player_by_nickname(nickname)
+        if taken is not None and taken.user_id != user_id:
+            raise GameError("dao_name_taken")
 
     profile = _generate_root_profile()
     root_type = profile["root_type"]
@@ -2572,23 +3003,247 @@ async def get_player_panel(user_id: str) -> PlayerPanelResult:
     if artifact is not None:
         brief = ARTIFACT_EFFECTS.get(str(artifact["item_id"]), {}).get("brief", artifact["description"])
         artifact_line = f"{artifact['name']} [{artifact['rarity']}] | {brief}"
+    attributes = _derived_attributes(player, primary_method)
+    target = next_realm(player.realm)
+    if target is None:
+        cultivation_line = f"{player.cultivation} | 已至最高境界"
+    else:
+        required = realm_requirement(target)
+        cultivation_line = f"{player.cultivation}/{required} | 距 {target.value} 还差 {max(0, required - player.cultivation)}"
     lines = [
-        f"道号: {player.nickname}",
-        f"灵根: {player.root_type.value}·{player.root_affinity.value}灵根 | 纯度 {player.root_purity}",
-        f"根性: {player.root_temperament.value} | 特质: {player.root_trait.value}",
-        f"根骨走势: {_root_growth_brief(player)}",
+        f"【道友面板】{player.nickname}",
         f"境界: {player.realm.value} | 此生上限: {_effective_max_realm(player).value}",
-        f"修为: {player.cultivation}",
-        f"悟性: {player.comprehension} | 道悟: {player.insight} | 冲关底蕴: {player.breakthrough_ready}",
-        f"命格: {_destiny_brief(player)}",
+        f"修为: {cultivation_line}",
+        f"寿元: {player.age}/{player.lifespan} | 体力: {player.stamina}/100 | 灵石: {player.spirit_stones}",
+        "",
+        f"【灵根】{player.root_affinity.value}灵根 · {player.root_type.value} | 纯度 {player.root_purity}",
+        f"定位: {AFFINITY_ROLE_TEXT[player.root_affinity]}",
+        f"加成: {_root_effect_summary(player, primary_method)}",
+        f"词条: {player.root_temperament.value}/{player.root_trait.value} | {_root_growth_brief(player)}",
+        "",
+        "【属性】",
+        *_attribute_lines(attributes),
+        "",
+        f"【修行】悟性 {player.comprehension} | 道悟 {player.insight} | 冲关底蕴 {player.breakthrough_ready}",
+        "用途: 悟性影响修炼/炼丹/参悟；道悟影响参玄/炼丹/突破；底蕴影响突破成功率，大境界必备。",
+        f"命格: {_destiny_brief(player)} | 轮回: {player.rebirth_count} 转 | 前尘点: {player.legacy_points} | 轮回印记: {player.soul_marks}",
         f"主修: {method_summary}",
         f"法宝: {artifact_line}",
-        f"灵石: {player.spirit_stones} | 福缘: {player.fortune} | 体力: {player.stamina}",
-        f"寿元: {player.age}/{player.lifespan}",
-        f"轮回: {player.rebirth_count} 转 | 前尘点: {player.legacy_points} | 轮回印记: {player.soul_marks}",
         _next_step_hint(player),
     ]
     return PlayerPanelResult(lines=lines)
+
+
+async def get_attribute_panel(user_id: str) -> PlayerPanelResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+    methods = await _load_methods(repo, player)
+    primary_method = _primary_method(player, methods)
+    attributes = _derived_attributes(player, primary_method)
+    method_name = "未定主修" if primary_method is None else str(primary_method["name"])
+    lines = [
+        f"【人物属性】{player.nickname}",
+        *_attribute_lines(attributes),
+        "",
+        "属性用途:",
+        "- 攻伐: 影响斗法与危险地图压制力。",
+        "- 护身: 影响高风险地图受挫损耗，斗法也会通过法宝/根骨体现。",
+        "- 身法: 影响奇遇型地图、抢机缘和地图风险规避。",
+        "- 灵力: 影响修炼收益、常规地图探索与丹药吸收。",
+        "- 悟道: 影响参悟、古藏、炼丹稳定性与突破加成。",
+        "- 破境: 影响冲关成功率，也提高部分险地收益。",
+        "- 丹道: 影响炼丹方向与药材地图收益。",
+        f"当前主修: {method_name}",
+        f"灵根定位: {player.root_affinity.value}灵根 | {AFFINITY_ROLE_TEXT[player.root_affinity]}",
+    ]
+    return PlayerPanelResult(lines=lines)
+
+
+async def list_maps_for_player(user_id: str) -> PlayerPanelResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+    lines = ["【地图】发送“探索 地图名”前往一次。"]
+    for area in MAP_AREAS:
+        lock_reason = _map_lock_reason(player, dict(area))
+        status = "可探索" if lock_reason is None else f"未解锁: {lock_reason}"
+        favored = "、".join(affinity.value for affinity in area["favored_affinities"])
+        lines.append(
+            f"- {area['name']} [{status}] 体力{area['stamina_cost']} | 推荐{area['focus_attribute']} | {area['focus']}"
+        )
+        lines.append(
+            f"  相性: {favored} | 产出: {area['reward_brief']}"
+        )
+    return PlayerPanelResult(lines=lines)
+
+
+async def explore_map_area(user_id: str, area_name: str) -> MapExploreResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+    area = _map_area_by_name(area_name)
+    if area is None:
+        raise GameError("map_not_found")
+    lock_reason = _map_lock_reason(player, area)
+    if lock_reason is not None:
+        raise GameError(f"map_locked:{lock_reason}")
+    await _check_action_cooldown(repo, user_id, "adventure")
+
+    stamina_cost = int(area["stamina_cost"])
+    if player.stamina < stamina_cost:
+        raise GameError("not_enough_stamina")
+
+    methods = await _load_methods(repo, player)
+    primary_method = _primary_method(player, methods)
+    world_state = await _get_today_world_state()
+    world_event = await _get_today_world_event()
+    event_bonus_values = _world_event_bonus_values(str(world_event["event_key"]))
+    attributes = _derived_attributes(player, primary_method)
+    focus_attribute = str(area["focus_attribute"])
+    attribute_bonus = min(28, attributes.get(focus_attribute, 0) // 6)
+    root_bonus = _map_root_bonus(player, area)
+    risk = int(area["risk"])
+    roll_value = (
+        random.randint(1, 100)
+        + attribute_bonus
+        + root_bonus
+        + world_state.adventure_bonus // 3
+        + min(10, player.fortune // 10)
+        + min(10, player.rebirth_count * 2)
+        - risk
+    )
+
+    reward_multiplier = _lifespan_reward_multiplier(player)
+    reward_multiplier += min(0.25, attributes["灵力"] / 600)
+    if player.root_affinity in tuple(area["favored_affinities"]):
+        reward_multiplier += 0.08
+    if primary_method is not None:
+        reward_multiplier += min(0.16, int(primary_method.get("adventure_bonus", 0)) / 100)
+
+    cultivation_gain = 0
+    spirit_stones_gain = 0
+    insight_delta = 0
+    breakthrough_delta = 0
+    fortune_delta = 0
+    item_id: str | None = None
+    item_name: str | None = None
+    success = roll_value >= 42
+
+    if roll_value <= 24:
+        cultivation_gain = -max(12, int(max(player.cultivation, 120) * (0.025 + risk / 1000)))
+        spirit_stones_gain = random.randint(0, max(8, 18 + risk))
+        message = f"你深入{area['name']}时判断失误，只带回零散收获，气机也被震散了些。"
+    elif roll_value <= 41:
+        cultivation_gain = _map_reward_amount(area, "cultivation_range", reward_multiplier * 0.55)
+        spirit_stones_gain = _map_reward_amount(area, "spirit_range", reward_multiplier * 0.55)
+        message = f"你在{area['name']}外围稳住阵脚，小有所得，但没有碰到真正机缘。"
+    elif roll_value <= 78:
+        cultivation_gain = _map_reward_amount(area, "cultivation_range", reward_multiplier)
+        spirit_stones_gain = _map_reward_amount(area, "spirit_range", reward_multiplier)
+        insight_delta = random.randint(*area["insight_range"])
+        breakthrough_delta = random.randint(*area["breakthrough_range"])
+        fortune_delta = random.randint(*area["fortune_range"])
+        if random.random() < 0.45:
+            item_id = _root_loot_choice(player, tuple(area["loot"]))
+        message = f"你在{area['name']}按图索骥，借{focus_attribute}之长找到了合适的修行契机。"
+    elif roll_value <= 105:
+        cultivation_gain = _map_reward_amount(area, "cultivation_range", reward_multiplier * 1.35)
+        spirit_stones_gain = _map_reward_amount(area, "spirit_range", reward_multiplier * 1.30)
+        insight_delta = random.randint(*area["insight_range"]) + 1
+        breakthrough_delta = random.randint(*area["breakthrough_range"]) + 1
+        fortune_delta = random.randint(*area["fortune_range"])
+        item_id = _root_loot_choice(player, tuple(area["loot"]))
+        message = f"{area['name']}灵机忽然翻涌，你抓住一线空隙，收获明显胜过寻常历练。"
+    else:
+        cultivation_gain = _map_reward_amount(area, "cultivation_range", reward_multiplier * 1.75)
+        spirit_stones_gain = _map_reward_amount(area, "spirit_range", reward_multiplier * 1.65)
+        insight_delta = random.randint(*area["insight_range"]) + 2
+        breakthrough_delta = random.randint(*area["breakthrough_range"]) + 2
+        fortune_delta = random.randint(*area["fortune_range"]) + 1
+        item_options = list(area["loot"])
+        if player.rebirth_count >= 1 and "rebirth-mark" not in item_options:
+            item_options.append("rebirth-mark")
+        if player.rebirth_count >= 2 and "marrow-jade" not in item_options:
+            item_options.append("marrow-jade")
+        item_id = _root_loot_choice(player, tuple(item_options))
+        message = f"你在{area['name']}撞见罕见机缘，灵根相性与{focus_attribute}同时发力，几乎满载而归。"
+
+    if cultivation_gain > 0:
+        cultivation_gain += int(cultivation_gain * float(event_bonus_values.get("adventure_cultivation", 0.0)))
+    if spirit_stones_gain > 0:
+        spirit_stones_gain += int(spirit_stones_gain * float(event_bonus_values.get("adventure_spirit", 0.0)))
+    if insight_delta > 0:
+        insight_delta = max(1, int(insight_delta * (1 + _insight_multiplier(player, primary_method) / 2)))
+    if focus_attribute == "破境" and roll_value >= 42:
+        breakthrough_delta += max(1, attributes["破境"] // 35)
+    if focus_attribute == "丹道" and item_id is None and roll_value >= 60:
+        item_id = _root_loot_choice(player, tuple(area["loot"]))
+
+    if item_id is not None:
+        item = await repo.get_item_by_id(item_id)
+        if item is not None:
+            item_name = str(item["name"])
+            await repo.add_inventory_item(user_id, item_id, 1)
+
+    mastery_gain = get_settings().method_mastery_adventure_gain + (1 if roll_value >= 78 else 0)
+    mastery_method_name, applied_mastery = await _apply_method_mastery(
+        repo,
+        user_id,
+        primary_method,
+        mastery_gain if cultivation_gain > 0 else 0,
+    )
+
+    await repo.update_player_stats(
+        user_id,
+        spirit_stones_delta=spirit_stones_gain,
+        cultivation_delta=cultivation_gain,
+        stamina_delta=-stamina_cost,
+        insight_delta=insight_delta,
+        breakthrough_ready_delta=breakthrough_delta,
+        fortune_delta=fortune_delta,
+    )
+    await repo.record_adventure(
+        user_id,
+        action_type="map_explore",
+        roll_value=roll_value,
+        outcome=f"{area['name']}：{message}",
+        reward_spirit_stones=spirit_stones_gain,
+        reward_cultivation=cultivation_gain,
+        reward_item_id=item_id,
+    )
+    await _set_action_cooldown(repo, user_id, "adventure")
+    _, lifespan_notice = await _apply_lifespan_progress(
+        repo,
+        player,
+        int(area["lifespan_progress"]) + world_state.lifespan_bonus,
+    )
+    event_notice = await _record_world_event_progress(player, "adventure")
+
+    return MapExploreResult(
+        area_name=str(area["name"]),
+        world_title=world_state.title,
+        roll_value=roll_value,
+        success=success,
+        message=message,
+        spirit_stones_delta=spirit_stones_gain,
+        cultivation_delta=cultivation_gain,
+        stamina_delta=-stamina_cost,
+        insight_delta=insight_delta,
+        breakthrough_ready_delta=breakthrough_delta,
+        fortune_delta=fortune_delta,
+        reward_item_name=item_name,
+        attribute_used=focus_attribute,
+        attribute_bonus=attribute_bonus,
+        root_bonus=root_bonus,
+        mastery_method_name=mastery_method_name,
+        mastery_gain=applied_mastery,
+        lifespan_notice=lifespan_notice,
+        event_notice=event_notice,
+    )
 
 
 async def sign_in(user_id: str) -> SignInResult:

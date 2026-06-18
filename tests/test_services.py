@@ -21,6 +21,8 @@ from xianbot.services import (
     encounter,
     end_meditation,
     explore_ancient_trial,
+    explore_map_area,
+    get_attribute_panel,
     get_destiny_status,
     get_player_panel,
     get_player_methods,
@@ -29,6 +31,7 @@ from xianbot.services import (
     get_today_world_event,
     get_today_world_state,
     join_sect,
+    list_maps_for_player,
     list_artifacts,
     rebirth,
     list_inventory,
@@ -836,7 +839,13 @@ def test_destiny_improves_alchemy_and_duel(tmp_path, monkeypatch) -> None:
         await join_sect("60003", "青岚宗")
 
         repo = GameRepository(get_settings().database_url)
-        await repo.update_player_stats("60001", rebirth_count_delta=1)
+        await repo.update_player_stats(
+            "60001",
+            rebirth_count_delta=1,
+            root_affinity=Affinity.WOOD,
+            root_temperament=RootTemperament.BALANCED,
+            root_trait=RootTrait.GATHERING,
+        )
         await repo.add_inventory_item("60001", "clear-dew", 4)
         await repo.add_inventory_item("60001", "flame-sand", 2)
         await repo.add_inventory_item("60001", "moon-dust", 2)
@@ -1401,6 +1410,103 @@ def test_panel_recent_actions_and_action_cooldowns(tmp_path, monkeypatch) -> Non
 
         recent_again = await get_recent_actions("93001")
         assert any("斗法" in line for line in recent_again.lines)
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_custom_dao_name_attributes_and_map_exploration(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian23.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    monkeypatch.setenv("QXIAN_ACTION_COOLDOWN_ADVENTURE_SECONDS", "0")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        player, created = await create_player_if_missing("94001", "青玄", strict_name=True)
+        assert created is True
+        assert player.nickname == "青玄"
+
+        try:
+            await create_player_if_missing("94002", "青玄", strict_name=True)
+        except GameError as exc:
+            assert str(exc) == "dao_name_taken"
+        else:
+            raise AssertionError("duplicate custom dao name should be rejected")
+
+        other, other_created = await create_player_if_missing("94002", "bad name with spaces", strict_name=False)
+        assert other_created is True
+        assert other.nickname.startswith("道友")
+
+        panel = await get_player_panel("94001")
+        panel_text = "\n".join(panel.lines)
+        assert "【道友面板】青玄" in panel_text
+        assert "【属性】" in panel_text
+        assert "用途: 悟性影响修炼/炼丹/参悟" in panel_text
+        assert "灵根" in panel_text
+
+        attributes = await get_attribute_panel("94001")
+        attribute_text = "\n".join(attributes.lines)
+        assert "【人物属性】青玄" in attribute_text
+        assert "攻伐" in attribute_text
+        assert "丹道" in attribute_text
+
+        maps = await list_maps_for_player("94001")
+        map_text = "\n".join(maps.lines)
+        assert "青岚山 [可探索]" in map_text
+        assert "雷泽 [未解锁: 需 1 转]" in map_text
+
+        repo = GameRepository(get_settings().database_url)
+        await join_sect("94001", "青岚宗")
+        await repo.update_player_stats(
+            "94001",
+            root_affinity=Affinity.WOOD,
+            cultivation_delta=400,
+            insight_delta=6,
+            breakthrough_ready_delta=8,
+            fortune_delta=5,
+        )
+
+        import xianbot.services as services
+
+        original_randint = services.random.randint
+        original_random = services.random.random
+        services.random.randint = lambda a, b: b
+        services.random.random = lambda: 0.2
+        try:
+            result = await explore_map_area("94001", "青岚山")
+        finally:
+            services.random.randint = original_randint
+            services.random.random = original_random
+
+        assert result.area_name == "青岚山"
+        assert result.roll_value > 100
+        assert result.cultivation_delta > 0
+        assert result.stamina_delta == -12
+        assert result.attribute_used == "灵力"
+        assert result.root_bonus > 0
+
+        refreshed = await get_player_status("94001")
+        assert refreshed is not None
+        assert refreshed.stamina == 88
+        assert refreshed.cultivation >= player.cultivation + result.cultivation_delta
+
+        other_refreshed = await get_player_status("94002")
+        assert other_refreshed is not None
+        assert other_refreshed.stamina == 100
+        assert other_refreshed.cultivation == 0
+
+        recent = await get_recent_actions("94001")
+        recent_text = "\n".join(recent.lines)
+        assert "地图探索" in recent_text
+        assert "青岚山" in recent_text
+
+        try:
+            await explore_map_area("94001", "雷泽")
+        except GameError as exc:
+            assert str(exc).startswith("map_locked:")
+        else:
+            raise AssertionError("locked map should reject low rebirth player")
 
     asyncio.run(scenario())
     get_settings.cache_clear()

@@ -34,6 +34,8 @@ from xianbot.services import (
     encounter,
     end_meditation,
     explore_ancient_trial,
+    explore_map_area,
+    get_attribute_panel,
     get_player_panel,
     get_player_methods,
     get_recent_actions,
@@ -45,6 +47,7 @@ from xianbot.services import (
     list_artifacts,
     list_inventory,
     list_market,
+    list_maps_for_player,
     list_sects_for_player,
     rebirth,
     set_primary_method,
@@ -64,6 +67,7 @@ rebirth_help_cmd = on_command("轮回帮助", aliases={"转世帮助", "轮回�
 newbie_cmd = on_command("新手引导", aliases={"新手", "开荒指引", "guide", "start"})
 enter_path_cmd = on_command("入道", aliases={"创建角色", "注册", "begin"})
 status_cmd = on_command("我的状态", aliases={"状态", "面板", "me", "profile", "status"})
+attribute_cmd = on_command("属性", aliases={"人物属性", "我的属性", "stats", "attr"})
 destiny_cmd = on_command("命格", aliases={"观命", "destiny"})
 sign_in_cmd = on_command("签到", aliases={"修仙签到", "daily", "sign"})
 sect_list_cmd = on_command("宗门列表", aliases={"宗门", "sects"})
@@ -75,6 +79,8 @@ inventory_cmd = on_command("背包", aliases={"包裹", "物品", "bag", "inv"})
 artifacts_cmd = on_command("我的法宝", aliases={"法宝", "artifacts"})
 equip_artifact_cmd = on_command("装备法宝", aliases={"装备", "equip"})
 adventure_cmd = on_command("历练", aliases={"冒险", "adventure"})
+map_cmd = on_command("地图", aliases={"修仙地图", "map", "maps"})
+explore_cmd = on_command("探索", aliases={"地图探索", "explore", "go"})
 encounter_cmd = on_command("奇遇", aliases={"机缘", "encounter"})
 breakthrough_cmd = on_command("突破", aliases={"冲关", "breakthrough"})
 meditate_cmd = on_command("闭关", aliases={"修炼", "meditate"})
@@ -186,7 +192,7 @@ def _cooldown_message(reason: str) -> str | None:
     _, action_type, seconds_text = reason.split(":", 2)
     seconds = max(1, int(seconds_text))
     action_names = {
-        "adventure": "历练",
+        "adventure": "历练/探索",
         "encounter": "奇遇",
         "duel": "斗法",
         "ancient_trial": "古藏试炼",
@@ -278,17 +284,31 @@ async def handle_newbie_guide() -> None:
 
 
 @enter_path_cmd.handle()
-async def handle_enter_path(event: Event) -> None:
+async def handle_enter_path(event: Event, args: Message = CommandArg()) -> None:
     user_id = event.get_user_id()
-    player, created = await create_player_if_missing(user_id, _event_nickname(event))
+    dao_name = args.extract_plain_text().strip()
+    strict_name = bool(dao_name)
+    if not dao_name:
+        dao_name = _event_nickname(event)
+    try:
+        player, created = await create_player_if_missing(user_id, dao_name, strict_name=strict_name)
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "invalid_dao_name":
+            await enter_path_cmd.finish("道号需为 2-12 位中文、英文、数字、下划线或短横，例如：入道 青玄。")
+        if reason == "reserved_dao_name":
+            await enter_path_cmd.finish("这个道号不能使用，换一个更像你的。")
+        if reason == "dao_name_taken":
+            await enter_path_cmd.finish("这个道号已被占用，换一个吧。")
+        raise
     if created:
         await enter_path_cmd.finish(
-            f"道友入道成功，灵根为{player.root_type.value}，主属性 {player.root_affinity.value}，纯度 {player.root_purity}。"
-            f"性情 {player.root_temperament.value}，特质 {player.root_trait.value}。"
-            f"初始灵石 {player.spirit_stones}，福缘 {player.fortune}。发送“我的状态”查看详情。"
+            f"{player.nickname} 入道成功。"
+            f"灵根为{player.root_affinity.value}灵根·{player.root_type.value}，纯度 {player.root_purity}。"
+            f"初始灵石 {player.spirit_stones}，福缘 {player.fortune}。发送“面板”查看详情，发送“地图”选择历练地点。"
         )
     await enter_path_cmd.finish(
-        f"道友早已踏上仙途，当前境界 {player.realm.value}，灵根 {player.root_type.value}·{player.root_affinity.value}。"
+        f"{player.nickname} 早已踏上仙途，当前境界 {player.realm.value}，灵根 {player.root_affinity.value}灵根·{player.root_type.value}。"
     )
 
 
@@ -301,6 +321,17 @@ async def handle_status(event: Event) -> None:
             await status_cmd.finish("你还未入道，发送“入道”开始。")
         raise
     await status_cmd.finish("\n".join(panel.lines))
+
+
+@attribute_cmd.handle()
+async def handle_attributes(event: Event) -> None:
+    try:
+        panel = await get_attribute_panel(event.get_user_id())
+    except GameError as exc:
+        if str(exc) == "player_not_found":
+            await attribute_cmd.finish("你还未入道，发送“入道 青玄”开始。")
+        raise
+    await attribute_cmd.finish("\n".join(panel.lines))
 
 
 @recent_cmd.handle()
@@ -548,6 +579,65 @@ async def handle_adventure(event: Event) -> None:
     if result.event_notice:
         lines.append(result.event_notice)
     await adventure_cmd.finish("\n".join(lines))
+
+
+@map_cmd.handle()
+async def handle_maps(event: Event) -> None:
+    try:
+        result = await list_maps_for_player(event.get_user_id())
+    except GameError as exc:
+        if str(exc) == "player_not_found":
+            await map_cmd.finish("你还未入道，发送“入道 青玄”开始。")
+        raise
+    await map_cmd.finish("\n".join(result.lines))
+
+
+@explore_cmd.handle()
+async def handle_explore(event: Event, args: Message = CommandArg()) -> None:
+    area_name = args.extract_plain_text().strip()
+    if not area_name:
+        await explore_cmd.finish("格式：探索 地图名，例如：探索 青岚山。先发送“地图”查看地点。")
+    try:
+        result = await explore_map_area(event.get_user_id(), area_name)
+    except GameError as exc:
+        reason = str(exc)
+        cooldown_message = _cooldown_message(reason)
+        if cooldown_message is not None:
+            await explore_cmd.finish(cooldown_message)
+        if reason == "player_not_found":
+            await explore_cmd.finish("你还未入道，发送“入道 青玄”开始。")
+        if reason == "map_not_found":
+            await explore_cmd.finish("未找到这个地图，先发送“地图”查看可探索地点。")
+        if reason.startswith("map_locked:"):
+            await explore_cmd.finish(f"该地图暂未解锁，{reason.split(':', 1)[1]}。")
+        if reason == "not_enough_stamina":
+            await explore_cmd.finish("体力不足，先签到、服用回灵散或等闭关出关后再探索。")
+        raise
+
+    reward_line = (
+        f"灵石 {result.spirit_stones_delta:+}，修为 {result.cultivation_delta:+}，体力 {result.stamina_delta}。"
+    )
+    if result.insight_delta:
+        reward_line += f" 道悟 {result.insight_delta:+}。"
+    if result.breakthrough_ready_delta:
+        reward_line += f" 冲关底蕴 {result.breakthrough_ready_delta:+}。"
+    if result.fortune_delta:
+        reward_line += f" 福缘 {result.fortune_delta:+}。"
+    if result.reward_item_name:
+        reward_line += f" 额外获得 {result.reward_item_name}。"
+    lines = [
+        f"[{result.world_title}] {result.area_name}",
+        result.message,
+        f"roll={result.roll_value} | {result.attribute_used}+{result.attribute_bonus} | 灵根相性+{result.root_bonus}",
+        reward_line,
+    ]
+    if result.mastery_method_name and result.mastery_gain:
+        lines.append(f"《{result.mastery_method_name}》熟练 +{result.mastery_gain}。")
+    if result.lifespan_notice:
+        lines.append(result.lifespan_notice)
+    if result.event_notice:
+        lines.append(result.event_notice)
+    await explore_cmd.finish("\n".join(lines))
 
 
 @encounter_cmd.handle()
