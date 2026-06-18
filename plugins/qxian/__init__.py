@@ -593,6 +593,10 @@ async def handle_consume(event: MessageEvent, args: Message = CommandArg()) -> N
             await consume_cmd.finish("这东西不能直接服用。")
         if reason == "rebirth_required":
             await consume_cmd.finish("洗髓丹药力太烈，至少一转之后再服用。")
+        if reason == "stamina_full":
+            await consume_cmd.finish("你当前体力已满，回灵散先留着更划算。")
+        if reason == "breakthrough_full":
+            await consume_cmd.finish("你的冲关底蕴已满，凝元丹暂时不必再服。")
         if reason == "not_enough_items":
             await consume_cmd.finish("背包数量不足。")
         raise
@@ -602,6 +606,10 @@ async def handle_consume(event: MessageEvent, args: Message = CommandArg()) -> N
         lines.append(f"修为 {result.cultivation_delta:+}")
     if result.stamina_delta:
         lines.append(f"体力 {result.stamina_delta:+}")
+    if result.insight_delta:
+        lines.append(f"道悟 {result.insight_delta:+}")
+    if result.breakthrough_ready_delta:
+        lines.append(f"冲关底蕴 {result.breakthrough_ready_delta:+}")
     if result.lifespan_delta:
         lines.append(f"寿元上限 {result.lifespan_delta:+}")
     await consume_cmd.finish("，".join(lines) + "。")

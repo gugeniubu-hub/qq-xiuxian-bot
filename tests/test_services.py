@@ -6,6 +6,7 @@ from xianbot.database import initialize_database
 from xianbot.domain import Affinity, DestinyType, MeditationMode, Realm, RootTemperament, RootTrait, RootType
 from xianbot.repository import GameRepository
 from xianbot.services import (
+    GameError,
     _effective_max_realm,
     adventure,
     breakthrough,
@@ -30,6 +31,7 @@ from xianbot.services import (
     list_artifacts,
     rebirth,
     list_inventory,
+    consume_item,
     set_primary_method,
     sign_in,
     start_meditation,
@@ -224,6 +226,80 @@ def test_meditation_and_alchemy_gain_root_specific_bias(tmp_path, monkeypatch) -
 
         assert insight_meditation.insight_reward > breakthrough_meditation.insight_reward
         assert breakthrough_meditation.breakthrough_reward > insight_meditation.breakthrough_reward
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_consumables_are_single_purpose_and_respect_caps(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian21.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("92001", "pilltester")
+        repo = GameRepository(get_settings().database_url)
+        await repo.add_inventory_item("92001", "essence-pill", 1)
+        await repo.add_inventory_item("92001", "insight-pill", 1)
+        await repo.add_inventory_item("92001", "restore-powder", 1)
+        await repo.update_player_stats(
+            "92001",
+            stamina_delta=-40,
+            breakthrough_ready_delta=91,
+        )
+
+        import xianbot.services as services
+
+        original_randint = services.random.randint
+        sequence = iter([12, 5, 33])
+        services.random.randint = lambda a, b: next(sequence)
+        try:
+            essence_result = await consume_item("92001", "凝元丹")
+            insight_result = await consume_item("92001", "悟道丹")
+            restore_result = await consume_item("92001", "回灵散")
+        finally:
+            services.random.randint = original_randint
+
+        assert essence_result.cultivation_delta == 0
+        assert essence_result.breakthrough_ready_delta == 9
+        assert insight_result.cultivation_delta == 0
+        assert insight_result.insight_delta >= 5
+        assert restore_result.stamina_delta == 33
+
+        player = await get_player_status("92001")
+        assert player is not None
+        assert player.breakthrough_ready == 100
+        assert player.insight == insight_result.insight_delta
+        assert player.stamina == 93
+
+        await repo.add_inventory_item("92001", "essence-pill", 1)
+        await repo.add_inventory_item("92001", "restore-powder", 1)
+        essence_before = next(
+            item["quantity"] for item in await list_inventory("92001") if item["item_id"] == "essence-pill"
+        )
+        restore_before = next(
+            item["quantity"] for item in await list_inventory("92001") if item["item_id"] == "restore-powder"
+        )
+
+        try:
+            await consume_item("92001", "凝元丹")
+        except GameError as exc:
+            assert str(exc) == "breakthrough_full"
+        else:
+            raise AssertionError("full breakthrough readiness should block essence pill use")
+
+        await repo.update_player_stats("92001", stamina_delta=7)
+        try:
+            await consume_item("92001", "回灵散")
+        except GameError as exc:
+            assert str(exc) == "stamina_full"
+        else:
+            raise AssertionError("full stamina should block restore powder use")
+
+        bag = await list_inventory("92001")
+        assert next(item["quantity"] for item in bag if item["item_id"] == "essence-pill") == essence_before
+        assert next(item["quantity"] for item in bag if item["item_id"] == "restore-powder") == restore_before
 
     asyncio.run(scenario())
     get_settings.cache_clear()

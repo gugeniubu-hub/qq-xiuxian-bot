@@ -624,6 +624,8 @@ class ConsumeItemResult:
     cultivation_delta: int = 0
     stamina_delta: int = 0
     lifespan_delta: int = 0
+    insight_delta: int = 0
+    breakthrough_ready_delta: int = 0
 
 
 @dataclass(slots=True)
@@ -3253,6 +3255,10 @@ async def consume_item(user_id: str, item_name: str) -> ConsumeItemResult:
         "marrow-pill",
     }:
         raise GameError("item_not_consumable")
+    if item_id == "restore-powder" and player.stamina >= 100:
+        raise GameError("stamina_full")
+    if item_id == "essence-pill" and player.breakthrough_ready >= 100:
+        raise GameError("breakthrough_full")
     if not await repo.remove_inventory_item(user_id, item_id, 1):
         raise GameError("not_enough_items")
 
@@ -3266,7 +3272,7 @@ async def consume_item(user_id: str, item_name: str) -> ConsumeItemResult:
             cultivation_delta=cultivation_delta,
         )
     if item_id == "restore-powder":
-        stamina_delta = random.randint(30, 45)
+        stamina_delta = min(random.randint(30, 45), 100 - player.stamina)
         await repo.update_player_stats(user_id, stamina_delta=stamina_delta)
         return ConsumeItemResult(
             item_name=str(item["name"]),
@@ -3282,30 +3288,29 @@ async def consume_item(user_id: str, item_name: str) -> ConsumeItemResult:
             lifespan_delta=lifespan_delta,
         )
     if item_id == "essence-pill":
-        breakthrough_delta = random.randint(8, 14) + max(0, player.comprehension // 6)
-        cultivation_delta = random.randint(70, 120)
+        breakthrough_delta = min(
+            random.randint(8, 14) + max(0, player.comprehension // 6),
+            100 - player.breakthrough_ready,
+        )
         await repo.update_player_stats(
             user_id,
-            cultivation_delta=cultivation_delta,
             breakthrough_ready_delta=breakthrough_delta,
         )
         return ConsumeItemResult(
             item_name=str(item["name"]),
             message=f"丹气沉入气海，你的冲关底蕴提升了 {breakthrough_delta} 点。",
-            cultivation_delta=cultivation_delta,
+            breakthrough_ready_delta=breakthrough_delta,
         )
     if item_id == "insight-pill":
         insight_delta = random.randint(3, 6) + max(0, player.comprehension // 8)
-        cultivation_delta = random.randint(40, 90)
         await repo.update_player_stats(
             user_id,
-            cultivation_delta=cultivation_delta,
             insight_delta=insight_delta,
         )
         return ConsumeItemResult(
             item_name=str(item["name"]),
             message=f"灵台一清，你的道悟增长了 {insight_delta} 点。",
-            cultivation_delta=cultivation_delta,
+            insight_delta=insight_delta,
         )
     if item_id == "marrow-pill":
         if player.rebirth_count <= 0:
