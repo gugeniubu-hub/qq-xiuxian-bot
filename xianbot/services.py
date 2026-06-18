@@ -618,6 +618,7 @@ class DuelResult:
     loser_cultivation_loss: int
     attacker_stamina_delta: int
     defender_stamina_delta: int
+    rounds: list[str] = field(default_factory=list)
     event_notice: str | None = None
 
 
@@ -1316,6 +1317,147 @@ def _duel_style_bonus(method: dict[str, object] | None) -> int:
     elif method_type == MethodType.REBIRTH:
         bonus += 5
     return bonus
+
+
+def _duel_signature(player: Player, method: dict[str, object] | None) -> tuple[str, str]:
+    if method is not None:
+        style = str(method["style"])
+        if MethodStyle(style) == MethodStyle.SURGING:
+            return "破势", "迎风而上"
+        if MethodStyle(style) == MethodStyle.INSIGHT:
+            return "照心", "以静制动"
+        if MethodStyle(style) == MethodStyle.REBIRTH:
+            return "回轮", "借前尘翻盘"
+        if MethodStyle(style) == MethodStyle.UNFETTERED:
+            return "游锋", "游走牵制"
+    if player.root_affinity == Affinity.THUNDER:
+        return "雷势", "一击定音"
+    if player.root_affinity == Affinity.WATER:
+        return "水势", "缠斗消磨"
+    if player.root_affinity == Affinity.FIRE:
+        return "火势", "强攻压制"
+    if player.root_affinity == Affinity.EARTH:
+        return "山势", "稳守反击"
+    return "平势", "见机应变"
+
+
+def _duel_move_table(player: Player, method: dict[str, object] | None) -> list[dict[str, object]]:
+    style = None if method is None else MethodStyle(str(method["style"]))
+    method_type = None if method is None else MethodType(str(method["method_type"]))
+    moves: list[dict[str, object]] = [
+        {"name": "运转灵机", "power": 4, "guard": 2, "crit": 0, "heal": 0},
+        {"name": "试探一式", "power": 7, "guard": 1, "crit": 5, "heal": 0},
+        {"name": "回气守势", "power": 2, "guard": 6, "crit": 0, "heal": 4},
+    ]
+    if player.root_affinity == Affinity.THUNDER:
+        moves[1]["name"] = "雷引一闪"
+        moves[1]["power"] = 10
+        moves[1]["crit"] = 9
+    elif player.root_affinity == Affinity.FIRE:
+        moves[1]["name"] = "烈焰直冲"
+        moves[1]["power"] = 9
+        moves[2]["heal"] = 2
+    elif player.root_affinity == Affinity.WATER:
+        moves[1]["name"] = "流水卸劲"
+        moves[1]["guard"] = 4
+        moves[2]["heal"] = 5
+    elif player.root_affinity == Affinity.EARTH:
+        moves[1]["name"] = "山岳镇压"
+        moves[1]["guard"] = 3
+        moves[2]["guard"] = 8
+    elif player.root_affinity == Affinity.VOID:
+        moves[1]["name"] = "虚步藏锋"
+        moves[1]["crit"] = 8
+        moves[2]["heal"] = 3
+
+    if style == MethodStyle.SURGING:
+        moves[1]["power"] = int(moves[1]["power"]) + 2
+    elif style == MethodStyle.INSIGHT:
+        moves[0]["guard"] = int(moves[0]["guard"]) + 2
+        moves[2]["heal"] = int(moves[2]["heal"]) + 1
+    elif style == MethodStyle.REBIRTH:
+        moves[0]["crit"] = int(moves[0]["crit"]) + 2
+        moves[1]["crit"] = int(moves[1]["crit"]) + 2
+    elif style == MethodStyle.UNFETTERED:
+        moves[1]["guard"] = int(moves[1]["guard"]) + 2
+
+    if method_type == MethodType.BATTLE:
+        moves[1]["power"] = int(moves[1]["power"]) + 2
+    elif method_type == MethodType.BODY:
+        moves[2]["guard"] = int(moves[2]["guard"]) + 2
+    elif method_type == MethodType.REBIRTH:
+        moves[0]["heal"] = int(moves[0]["heal"]) + 2
+        moves[1]["crit"] = int(moves[1]["crit"]) + 1
+
+    if player.rebirth_count > 0:
+        moves[1]["crit"] = int(moves[1]["crit"]) + min(4, player.rebirth_count)
+    if player.root_trait == RootTrait.EMBER:
+        moves[1]["power"] = int(moves[1]["power"]) + 1
+    if player.root_trait == RootTrait.WANDERING:
+        moves[1]["crit"] = int(moves[1]["crit"]) + 1
+    return moves
+
+
+def _duel_rounds(
+    attacker: Player,
+    attacker_method: dict[str, object] | None,
+    defender: Player,
+    defender_method: dict[str, object] | None,
+) -> list[str]:
+    attacker_signature, attacker_style_hint = _duel_signature(attacker, attacker_method)
+    defender_signature, defender_style_hint = _duel_signature(defender, defender_method)
+    attacker_moves = _duel_move_table(attacker, attacker_method)
+    defender_moves = _duel_move_table(defender, defender_method)
+    attacker_hp = 100 + max(0, attacker.cultivation // 120)
+    defender_hp = 100 + max(0, defender.cultivation // 120)
+    logs: list[str] = []
+
+    for round_no in range(1, 4):
+        attacker_move = random.choice(attacker_moves)
+        defender_move = random.choice(defender_moves)
+        attacker_roll = random.randint(1, 100) + _duel_style_bonus(attacker_method) // 4
+        defender_roll = random.randint(1, 100) + _duel_style_bonus(defender_method) // 4
+
+        attacker_attack = (
+            attacker_roll
+            + int(attacker_move["power"])
+            + _root_affinity_duel_bonus(attacker)
+            + attacker.rebirth_count * 2
+            + min(8, attacker.breakthrough_ready // 10)
+        )
+        defender_defense = (
+            defender_roll
+            + int(defender_move["guard"])
+            + _root_affinity_duel_bonus(defender)
+            + defender.rebirth_count * 2
+            + min(8, defender.breakthrough_ready // 10)
+        )
+        attacker_damage = max(3, attacker_attack - defender_defense // 2)
+        defender_damage = max(2, defender_roll + int(defender_move["power"]) - attacker_roll // 2)
+
+        if int(attacker_move["heal"]) > 0:
+            attacker_hp += int(attacker_move["heal"]) + max(0, attacker.insight // 30)
+        if int(defender_move["heal"]) > 0:
+            defender_hp += int(defender_move["heal"]) + max(0, defender.insight // 30)
+
+        if int(attacker_move["crit"]) and attacker_roll + int(attacker_move["crit"]) >= defender_roll + 8:
+            attacker_damage += 6 + attacker.rebirth_count
+        if int(defender_move["crit"]) and defender_roll + int(defender_move["crit"]) >= attacker_roll + 8:
+            defender_damage += 6 + defender.rebirth_count
+
+        defender_hp -= attacker_damage
+        attacker_hp -= defender_damage
+
+        logs.append(
+            f"第{round_no}回合：{attacker.nickname}【{attacker_move['name']}】↔{defender.nickname}【{defender_move['name']}】"
+            f" | {attacker.nickname}-{attacker_damage} / {defender.nickname}-{defender_damage}"
+            f" | 余势 {attacker_hp}/{defender_hp}"
+        )
+        if attacker_hp <= 0 or defender_hp <= 0:
+            break
+
+    logs.append(f"{attacker.nickname}以{attacker_signature}对{defender_signature}，{attacker_style_hint}；{defender_style_hint}。")
+    return logs
 
 
 def _duel_total(player: Player, method: dict[str, object] | None, roll_value: int) -> int:
@@ -2760,6 +2902,7 @@ async def duel(user_id: str, target: str) -> DuelResult:
     defender_methods = await _load_methods(repo, defender)
     attacker_primary = _primary_method(attacker, attacker_methods)
     defender_primary = _primary_method(defender, defender_methods)
+    duel_rounds = _duel_rounds(attacker, attacker_primary, defender, defender_primary)
 
     attacker_roll = random.randint(1, 100) + world_state.adventure_bonus // 3
     defender_roll = random.randint(1, 100) + world_state.encounter_bonus // 3
@@ -2842,6 +2985,7 @@ async def duel(user_id: str, target: str) -> DuelResult:
         loser_cultivation_loss=loser_cultivation_loss,
         attacker_stamina_delta=-stamina_cost,
         defender_stamina_delta=-stamina_cost,
+        rounds=duel_rounds,
         event_notice=event_notice,
     )
 

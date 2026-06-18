@@ -533,6 +533,8 @@ def test_duel_randomness_and_influences_are_applied(tmp_path, monkeypatch) -> No
         assert any(result.attacker_total != result.defender_total for result in results)
         assert all(result.winner_name == "stronger" for result in results)
         assert all(result.attacker_total > result.defender_total for result in results)
+        assert all(result.rounds for result in results)
+        assert any("第1回合" in line for result in results for line in result.rounds)
 
         stronger = await get_player_status("40001")
         weaker = await get_player_status("40002")
@@ -645,9 +647,9 @@ def test_destiny_improves_alchemy_and_duel(tmp_path, monkeypatch) -> None:
             fortune_delta=5,
         )
 
-        sequence = iter([88, 36, 52])
+        sequence = iter([60, 42, 58, 45, 62, 40, 88, 36, 52])
         duel_randint = services.random.randint
-        services.random.randint = lambda a, b: next(sequence)
+        services.random.randint = lambda a, b: next(sequence, 52)
         try:
             baseline_duel = await duel("60002", "60003")
         finally:
@@ -669,9 +671,9 @@ def test_destiny_improves_alchemy_and_duel(tmp_path, monkeypatch) -> None:
             destiny_level_delta=4,
         )
 
-        sequence = iter([88, 36, 52])
+        sequence = iter([60, 42, 58, 45, 62, 40, 88, 36, 52])
         duel_randint = services.random.randint
-        services.random.randint = lambda a, b: next(sequence)
+        services.random.randint = lambda a, b: next(sequence, 52)
         try:
             empowered_duel = await duel("60002", "60003")
         finally:
@@ -923,9 +925,9 @@ def test_alchemy_and_duel_gameplay(tmp_path, monkeypatch) -> None:
             fortune_delta=5,
         )
 
-        sequence = iter([88, 36, 52])
+        sequence = iter([60, 42, 58, 45, 62, 40, 88, 36, 52])
         duel_randint = services.random.randint
-        services.random.randint = lambda a, b: next(sequence)
+        services.random.randint = lambda a, b: next(sequence, 52)
         try:
             duel_result = await duel("10006", "10007")
         finally:
@@ -933,6 +935,8 @@ def test_alchemy_and_duel_gameplay(tmp_path, monkeypatch) -> None:
 
         assert duel_result.winner_name == "tester6"
         assert duel_result.winner_spirit_stones_gain >= 52
+        assert len(duel_result.rounds) >= 2
+        assert any("回合" in line for line in duel_result.rounds)
 
         winner = await get_player_status("10006")
         loser = await get_player_status("10007")

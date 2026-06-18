@@ -700,6 +700,7 @@ async def handle_duel(event: MessageEvent, args: Message = CommandArg()) -> None
         "\n".join(
             [
                 f"[{result.world_title}] {result.message}",
+                *result.rounds,
                 f"{result.attacker_name}: roll={result.attacker_roll} | 总势 {result.attacker_total}",
                 f"{result.defender_name}: roll={result.defender_roll} | 总势 {result.defender_total}",
                 f"胜者 {result.winner_name}，获灵石 +{result.winner_spirit_stones_gain}，修为 +{result.winner_cultivation_gain}，道悟 +{result.winner_insight_gain}。",
