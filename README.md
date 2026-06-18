@@ -42,13 +42,60 @@
 - 高活跃主动玩法支持可配置轻量冷却，避免群聊被短时间刷屏
 - 丹药效果已收口为更直观的单用途设计
 
+## QQ 机器人接入方式
+
+本项目现在同时兼容两种接入:
+
+1. 官方 QQ 开放平台创建的机器人，推荐用于你的场景。
+2. NapCat / OneBot V11，作为兼容路径保留。
+
+### 官方 QQ 开放平台机器人
+
+推荐优先使用 WebSocket 模式。服务启动后会主动连接 QQ 网关，不需要先配置公网回调地址。
+
+环境变量示例:
+
+```dotenv
+DRIVER=~fastapi+~httpx+~websockets
+HOST=0.0.0.0
+PORT=8080
+
+QQ_IS_SANDBOX=false
+QQ_VERIFY_WEBHOOK=true
+QQ_BOTS='[{"id":"你的AppID","token":"你的Token","secret":"你的AppSecret","intent":{"c2c_group_at_messages":true},"use_websocket":true}]'
+```
+
+如果你想使用 Webhook 模式，则把 `use_websocket` 改成 `false`，并在 QQ 开放平台配置 HTTPS 回调地址:
+
+```text
+https://你的域名/qxian/qq/webhook
+```
+
+公域 QQ 群机器人通常会把玩家标识为 `member_openid`，不是传统 QQ 号。因此群里斗法建议用:
+
+```text
+斗法 @目标
+```
+
+而不是手输 QQ 号。项目会继续兼容 OneBot 的 `斗法 QQ号`。
+
+### OneBot / NapCat
+
+如果使用 NapCat 或其他 OneBot V11 实现，保留下面配置:
+
+```dotenv
+ONEBOT_ACCESS_TOKEN=
+ONEBOT_SECRET=
+```
+
 ## 技术方案
 
 - Python 3.11+
 - [NoneBot2](https://github.com/nonebot/nonebot2)
 - [OneBot V11 Adapter](https://github.com/nonebot/adapter-onebot)
+- [QQ Adapter](https://github.com/nonebot/adapter-qq)
 - SQLite
-- NapCatQQ / 兼容 OneBot V11 的 QQ 机器人实现
+- 官方 QQ 开放平台机器人，或 NapCatQQ / 兼容 OneBot V11 的 QQ 机器人实现
 
 ## 为什么这样做
 

@@ -1,7 +1,7 @@
 import asyncio
 
 from nonebot import get_driver, logger, on_command
-from nonebot.adapters.onebot.v11 import Message, MessageEvent
+from nonebot.adapters import Event, Message
 from nonebot.params import CommandArg
 
 from xianbot.config import get_settings
@@ -153,11 +153,31 @@ def _duel_target_text(args: Message) -> str:
     if plain:
         return plain
     for seg in args:
-        if seg.type == "at":
-            qq = seg.data.get("qq")
-            if qq:
-                return str(qq)
+        if seg.type in {"at", "mention_user"}:
+            if seg.data.get("is_bot"):
+                continue
+            for key in ("qq", "user_id", "id", "uin"):
+                target_id = seg.data.get(key)
+                if target_id:
+                    return str(target_id)
     return ""
+
+
+def _event_nickname(event: Event) -> str:
+    sender = getattr(event, "sender", None)
+    for attr in ("nickname", "card", "name"):
+        value = getattr(sender, attr, None)
+        if value:
+            return str(value)
+
+    author = getattr(event, "author", None)
+    for attr in ("username", "nick", "nickname", "id", "member_openid", "user_openid"):
+        value = getattr(author, attr, None)
+        if value:
+            return str(value)
+
+    user_id = event.get_user_id()
+    return f"道友{user_id[-6:]}" if len(user_id) > 6 else user_id
 
 
 def _cooldown_message(reason: str) -> str | None:
@@ -176,7 +196,7 @@ def _cooldown_message(reason: str) -> str | None:
 
 
 @help_cmd.handle()
-async def handle_help(event: MessageEvent) -> None:
+async def handle_help(event: Event) -> None:
     await help_cmd.finish(HELP_TEXT.format(user_id=event.get_user_id()))
 
 
@@ -191,7 +211,7 @@ async def handle_world_state() -> None:
 
 
 @world_event_cmd.handle()
-async def handle_world_event(event: MessageEvent) -> None:
+async def handle_world_event(event: Event) -> None:
     result = await get_today_world_event(event.get_user_id())
     status = "已完成" if result.completed else f"{result.current_progress}/{result.target_progress}"
     lines = [
@@ -208,7 +228,7 @@ async def handle_world_event(event: MessageEvent) -> None:
 
 
 @world_event_claim_cmd.handle()
-async def handle_world_event_claim(event: MessageEvent) -> None:
+async def handle_world_event_claim(event: Event) -> None:
     try:
         result = await claim_today_world_event_reward(event.get_user_id())
     except GameError as exc:
@@ -258,9 +278,9 @@ async def handle_newbie_guide() -> None:
 
 
 @enter_path_cmd.handle()
-async def handle_enter_path(event: MessageEvent) -> None:
+async def handle_enter_path(event: Event) -> None:
     user_id = event.get_user_id()
-    player, created = await create_player_if_missing(user_id, event.sender.nickname or user_id)
+    player, created = await create_player_if_missing(user_id, _event_nickname(event))
     if created:
         await enter_path_cmd.finish(
             f"道友入道成功，灵根为{player.root_type.value}，主属性 {player.root_affinity.value}，纯度 {player.root_purity}。"
@@ -273,7 +293,7 @@ async def handle_enter_path(event: MessageEvent) -> None:
 
 
 @status_cmd.handle()
-async def handle_status(event: MessageEvent) -> None:
+async def handle_status(event: Event) -> None:
     try:
         panel = await get_player_panel(event.get_user_id())
     except GameError as exc:
@@ -284,7 +304,7 @@ async def handle_status(event: MessageEvent) -> None:
 
 
 @recent_cmd.handle()
-async def handle_recent_actions(event: MessageEvent) -> None:
+async def handle_recent_actions(event: Event) -> None:
     try:
         result = await get_recent_actions(event.get_user_id())
     except GameError as exc:
@@ -295,7 +315,7 @@ async def handle_recent_actions(event: MessageEvent) -> None:
 
 
 @destiny_cmd.handle()
-async def handle_destiny(event: MessageEvent) -> None:
+async def handle_destiny(event: Event) -> None:
     try:
         result = await get_destiny_status(event.get_user_id())
     except GameError as exc:
@@ -314,7 +334,7 @@ async def handle_destiny(event: MessageEvent) -> None:
 
 
 @sign_in_cmd.handle()
-async def handle_sign_in(event: MessageEvent) -> None:
+async def handle_sign_in(event: Event) -> None:
     user_id = event.get_user_id()
     player = await get_player_status(user_id)
     if player is None:
@@ -335,7 +355,7 @@ async def handle_sign_in(event: MessageEvent) -> None:
 
 
 @sect_list_cmd.handle()
-async def handle_sect_list(event: MessageEvent) -> None:
+async def handle_sect_list(event: Event) -> None:
     sects = await list_sects_for_player(event.get_user_id())
     if not sects:
         await sect_list_cmd.finish("当前没有可加入的宗门。")
@@ -350,7 +370,7 @@ async def handle_sect_list(event: MessageEvent) -> None:
 
 
 @rebirth_cmd.handle()
-async def handle_rebirth_action(event: MessageEvent) -> None:
+async def handle_rebirth_action(event: Event) -> None:
     try:
         result = await rebirth(event.get_user_id())
     except GameError as exc:
@@ -378,7 +398,7 @@ async def handle_rebirth_action(event: MessageEvent) -> None:
 
 
 @join_sect_cmd.handle()
-async def handle_join_sect(event: MessageEvent, args: Message = CommandArg()) -> None:
+async def handle_join_sect(event: Event, args: Message = CommandArg()) -> None:
     sect_name = args.extract_plain_text().strip()
     if not sect_name:
         await join_sect_cmd.finish("请输入宗门名，例如：加入宗门 青岚宗")
@@ -401,7 +421,7 @@ async def handle_join_sect(event: MessageEvent, args: Message = CommandArg()) ->
 
 
 @methods_cmd.handle()
-async def handle_methods(event: MessageEvent) -> None:
+async def handle_methods(event: Event) -> None:
     player = await get_player_status(event.get_user_id())
     if player is None:
         await methods_cmd.finish("你还未入道，发送“入道”开始。")
@@ -426,7 +446,7 @@ async def handle_methods(event: MessageEvent) -> None:
 
 
 @primary_method_cmd.handle()
-async def handle_primary_method(event: MessageEvent, args: Message = CommandArg()) -> None:
+async def handle_primary_method(event: Event, args: Message = CommandArg()) -> None:
     method_name = args.extract_plain_text().strip()
     if not method_name:
         await primary_method_cmd.finish("格式：主修功法 功法名")
@@ -447,7 +467,7 @@ async def handle_primary_method(event: MessageEvent, args: Message = CommandArg(
 
 
 @inventory_cmd.handle()
-async def handle_inventory(event: MessageEvent) -> None:
+async def handle_inventory(event: Event) -> None:
     player = await get_player_status(event.get_user_id())
     if player is None:
         await inventory_cmd.finish("你还未入道，发送“入道”开始。")
@@ -462,7 +482,7 @@ async def handle_inventory(event: MessageEvent) -> None:
 
 
 @artifacts_cmd.handle()
-async def handle_artifacts(event: MessageEvent) -> None:
+async def handle_artifacts(event: Event) -> None:
     player = await get_player_status(event.get_user_id())
     if player is None:
         await artifacts_cmd.finish("你还未入道，发送“入道”开始。")
@@ -480,7 +500,7 @@ async def handle_artifacts(event: MessageEvent) -> None:
 
 
 @equip_artifact_cmd.handle()
-async def handle_equip_artifact(event: MessageEvent, args: Message = CommandArg()) -> None:
+async def handle_equip_artifact(event: Event, args: Message = CommandArg()) -> None:
     artifact_name = args.extract_plain_text().strip()
     if not artifact_name:
         await equip_artifact_cmd.finish("格式：装备法宝 法宝名")
@@ -499,7 +519,7 @@ async def handle_equip_artifact(event: MessageEvent, args: Message = CommandArg(
 
 
 @adventure_cmd.handle()
-async def handle_adventure(event: MessageEvent) -> None:
+async def handle_adventure(event: Event) -> None:
     try:
         result = await adventure(event.get_user_id())
     except GameError as exc:
@@ -531,7 +551,7 @@ async def handle_adventure(event: MessageEvent) -> None:
 
 
 @encounter_cmd.handle()
-async def handle_encounter(event: MessageEvent) -> None:
+async def handle_encounter(event: Event) -> None:
     try:
         result = await encounter(event.get_user_id())
     except GameError as exc:
@@ -564,7 +584,7 @@ async def handle_encounter(event: MessageEvent) -> None:
 
 
 @breakthrough_cmd.handle()
-async def handle_breakthrough(event: MessageEvent) -> None:
+async def handle_breakthrough(event: Event) -> None:
     try:
         result = await breakthrough(event.get_user_id())
     except GameError as exc:
@@ -598,7 +618,7 @@ async def handle_breakthrough(event: MessageEvent) -> None:
 
 
 @meditate_cmd.handle()
-async def handle_meditation(event: MessageEvent, args: Message = CommandArg()) -> None:
+async def handle_meditation(event: Event, args: Message = CommandArg()) -> None:
     parts = args.extract_plain_text().strip().split()
     minutes = None
     mode = None
@@ -637,7 +657,7 @@ async def handle_meditation(event: MessageEvent, args: Message = CommandArg()) -
 
 
 @leave_meditation_cmd.handle()
-async def handle_leave_meditation(event: MessageEvent) -> None:
+async def handle_leave_meditation(event: Event) -> None:
     try:
         result = await end_meditation(event.get_user_id())
     except GameError as exc:
@@ -667,7 +687,7 @@ async def handle_leave_meditation(event: MessageEvent) -> None:
 
 
 @consume_cmd.handle()
-async def handle_consume(event: MessageEvent, args: Message = CommandArg()) -> None:
+async def handle_consume(event: Event, args: Message = CommandArg()) -> None:
     item_name = args.extract_plain_text().strip()
     if not item_name:
         await consume_cmd.finish("格式：服用 物品名")
@@ -706,7 +726,7 @@ async def handle_consume(event: MessageEvent, args: Message = CommandArg()) -> N
 
 
 @alchemy_cmd.handle()
-async def handle_alchemy(event: MessageEvent, args: Message = CommandArg()) -> None:
+async def handle_alchemy(event: Event, args: Message = CommandArg()) -> None:
     recipe_name = args.extract_plain_text().strip()
     if not recipe_name:
         await alchemy_cmd.finish("格式：炼丹 丹药名，例如：炼丹 凝元丹")
@@ -740,7 +760,7 @@ async def handle_alchemy(event: MessageEvent, args: Message = CommandArg()) -> N
 
 
 @insight_cmd.handle()
-async def handle_insight(event: MessageEvent, args: Message = CommandArg()) -> None:
+async def handle_insight(event: Event, args: Message = CommandArg()) -> None:
     method_name = args.extract_plain_text().strip() or None
     try:
         result = await contemplate_method(event.get_user_id(), method_name)
@@ -768,7 +788,7 @@ async def handle_insight(event: MessageEvent, args: Message = CommandArg()) -> N
 
 
 @ancient_trial_cmd.handle()
-async def handle_ancient_trial(event: MessageEvent) -> None:
+async def handle_ancient_trial(event: Event) -> None:
     try:
         result = await explore_ancient_trial(event.get_user_id())
     except GameError as exc:
@@ -800,7 +820,7 @@ async def handle_ancient_trial(event: MessageEvent) -> None:
 
 
 @duel_cmd.handle()
-async def handle_duel(event: MessageEvent, args: Message = CommandArg()) -> None:
+async def handle_duel(event: Event, args: Message = CommandArg()) -> None:
     target = _duel_target_text(args)
     if not target:
         await duel_cmd.finish("格式：斗法 @目标 或 斗法 QQ号")
@@ -852,7 +872,7 @@ async def handle_market_list() -> None:
 
 
 @market_create_cmd.handle()
-async def handle_market_create(event: MessageEvent, args: Message = CommandArg()) -> None:
+async def handle_market_create(event: Event, args: Message = CommandArg()) -> None:
     parts = args.extract_plain_text().strip().split()
     if len(parts) != 3:
         await market_create_cmd.finish("格式：坊市上架 物品名 单价 数量")
@@ -886,7 +906,7 @@ async def handle_market_create(event: MessageEvent, args: Message = CommandArg()
 
 
 @market_buy_cmd.handle()
-async def handle_market_buy(event: MessageEvent, args: Message = CommandArg()) -> None:
+async def handle_market_buy(event: Event, args: Message = CommandArg()) -> None:
     listing_text = args.extract_plain_text().strip()
     if not listing_text.isdigit():
         await market_buy_cmd.finish("格式：坊市购买 编号")
