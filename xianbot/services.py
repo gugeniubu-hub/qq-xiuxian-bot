@@ -484,7 +484,7 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "aliases": ("青岚山", "青岚", "qinglan"),
         "required_rebirth_count": 0,
         "required_realm": Realm.QI_1,
-        "stamina_cost": 12,
+        "stamina_cost": 8,
         "risk": 0,
         "favored_affinities": (Affinity.WOOD, Affinity.WATER),
         "focus_attribute": "悟性",
@@ -505,7 +505,7 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "aliases": ("沧浪泽", "沧浪", "canglang"),
         "required_rebirth_count": 0,
         "required_realm": Realm.QI_2,
-        "stamina_cost": 14,
+        "stamina_cost": 9,
         "risk": 4,
         "favored_affinities": (Affinity.WATER, Affinity.WOOD, Affinity.ICE),
         "focus_attribute": "丹道",
@@ -526,7 +526,7 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "aliases": ("赤霞岭", "赤霞", "chixia"),
         "required_rebirth_count": 0,
         "required_realm": Realm.QI_3,
-        "stamina_cost": 16,
+        "stamina_cost": 10,
         "risk": 8,
         "favored_affinities": (Affinity.FIRE, Affinity.THUNDER, Affinity.EARTH),
         "focus_attribute": "破境",
@@ -547,7 +547,7 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "aliases": ("玄铁谷", "玄铁", "xuantiegou", "xuantie"),
         "required_rebirth_count": 0,
         "required_realm": Realm.QI_4,
-        "stamina_cost": 16,
+        "stamina_cost": 10,
         "risk": 7,
         "favored_affinities": (Affinity.METAL, Affinity.EARTH, Affinity.FIRE),
         "focus_attribute": "物攻",
@@ -568,7 +568,7 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "aliases": ("乱风原", "乱风", "luanfeng"),
         "required_rebirth_count": 0,
         "required_realm": Realm.FOUNDATION_1,
-        "stamina_cost": 18,
+        "stamina_cost": 11,
         "risk": 10,
         "favored_affinities": (Affinity.WIND, Affinity.WATER, Affinity.WOOD),
         "focus_attribute": "速度",
@@ -589,7 +589,7 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "aliases": ("雷泽", "leize"),
         "required_rebirth_count": 1,
         "required_realm": Realm.FOUNDATION_2,
-        "stamina_cost": 20,
+        "stamina_cost": 12,
         "risk": 14,
         "favored_affinities": (Affinity.THUNDER, Affinity.FIRE, Affinity.METAL),
         "focus_attribute": "破境",
@@ -610,7 +610,7 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "aliases": ("太虚古域", "太虚", "古域", "taixu"),
         "required_rebirth_count": 2,
         "required_realm": Realm.CORE_1,
-        "stamina_cost": 22,
+        "stamina_cost": 14,
         "risk": 18,
         "favored_affinities": (Affinity.VOID, Affinity.THUNDER, Affinity.WIND, Affinity.ICE),
         "focus_attribute": "悟道",
@@ -644,6 +644,71 @@ METHOD_REQUEST_REALM_SPIRIT_STEP: dict[MethodGrade, int] = {
     MethodGrade.HEAVEN: 220,
     MethodGrade.ANCIENT: 260,
 }
+
+ADVENTURE_EVENTS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "wolf-pack",
+        "name": "山魈群围猎",
+        "event_type": "野怪",
+        "weight": 28,
+        "power": 42,
+        "danger": "低",
+        "win": "你在山林间被山魈群盯上，几番换位后斩开包围，妖血溅在草叶上。",
+        "draw": "山魈群不肯退，你且战且走，最后以灵石诱开兽群。",
+        "lose": "山魈群从暗处扑出，你护住要害强行脱身，肩背留下几道深痕。",
+    },
+    {
+        "key": "bandit-cultivator",
+        "name": "劫修拦路",
+        "event_type": "战斗",
+        "weight": 22,
+        "power": 58,
+        "danger": "中",
+        "win": "劫修借乱风截道，你看破破绽反压一手，夺回了主动。",
+        "draw": "你和劫修互换数招，各自忌惮，最后都没有继续死拼。",
+        "lose": "劫修暗器极快，你被迫舍财保命，遁出十余里才压下伤势。",
+    },
+    {
+        "key": "beast-king",
+        "name": "妖兽王游猎",
+        "event_type": "野怪",
+        "weight": 12,
+        "power": 78,
+        "danger": "高",
+        "win": "一头妖兽王踏碎山石而来，你以险招破其气门，侥幸夺得兽王残灵。",
+        "draw": "妖兽王气血太盛，你缠斗许久才等到它退回巢穴。",
+        "lose": "妖兽王一撞如山崩，你几乎被震断气海，只凭最后一口气逃出生天。",
+    },
+    {
+        "key": "mist-ruin",
+        "name": "迷雾古阵",
+        "event_type": "事件",
+        "weight": 18,
+        "power": 52,
+        "danger": "中",
+        "win": "迷雾古阵忽然亮起，你顺着阵纹找出生门，还抄录到半页心得。",
+        "draw": "你在雾中兜转半日，虽然没有破阵，也避开了最凶险的阵眼。",
+        "lose": "古阵倒转灵机，你误踩死门，神识被狠狠撕扯了一下。",
+    },
+    {
+        "key": "fallen-star",
+        "name": "星坠裂隙",
+        "event_type": "事件",
+        "weight": 8,
+        "power": 86,
+        "danger": "极高",
+        "win": "星坠裂隙里剑光一闪，你强压心悸探入其中，竟听见古老传承回响。",
+        "draw": "星坠裂隙转瞬闭合，你只截住一缕星辉，已算不虚此行。",
+        "lose": "星辉反噬来得太快，你眼前一黑，醒来时命灯已暗了一截。",
+    },
+)
+
+RARE_ADVENTURE_METHOD_IDS: tuple[str, ...] = (
+    "frost-soul-wild",
+    "beast-body-wild",
+    "starfall-sword-wild",
+    "thunder-wind-wild",
+)
 
 
 class GameError(ValueError):
@@ -773,6 +838,11 @@ class AdventureResult:
     insight_delta: int = 0
     lifespan_notice: str | None = None
     event_notice: str | None = None
+    event_type: str | None = None
+    danger_level: str | None = None
+    injury_notice: str | None = None
+    death_triggered: bool = False
+    reward_method_name: str | None = None
 
 
 @dataclass(slots=True)
@@ -869,6 +939,16 @@ class ArtifactEquipResult:
     artifact_name: str
     rarity: str
     effect_brief: str
+
+
+@dataclass(slots=True)
+class RootRerollResult:
+    spirit_stones_cost: int
+    stamina_cost: int
+    old_root_brief: str
+    new_root_brief: str
+    remaining_spirit_stones: int
+    remaining_stamina: int
 
 
 @dataclass(slots=True)
@@ -2123,6 +2203,149 @@ def _map_root_bonus(player: Player, area: dict[str, Any]) -> int:
     return bonus
 
 
+def _choose_adventure_event() -> dict[str, Any]:
+    total_weight = sum(int(event["weight"]) for event in ADVENTURE_EVENTS)
+    roll = random.randint(1, total_weight)
+    cursor = 0
+    for event in ADVENTURE_EVENTS:
+        cursor += int(event["weight"])
+        if roll <= cursor:
+            return dict(event)
+    return dict(ADVENTURE_EVENTS[-1])
+
+
+def _adventure_combat_score(
+    player: Player,
+    method: dict[str, object] | None,
+    attributes: dict[str, int],
+) -> int:
+    route_score = max(
+        attributes["物攻"],
+        attributes["法攻"],
+        (attributes["物攻"] + attributes["法攻"]) // 2 + attributes["速度"] // 3,
+    )
+    defense_score = (attributes["物防"] + attributes["法防"] + attributes["气血"] // 4) // 3
+    score = _realm_power(player) + route_score // 3 + defense_score // 3 + attributes["速度"] // 4
+    score += _root_affinity_duel_bonus(player) + _artifact_duel_bonus(player)
+    score += min(12, player.breakthrough_ready // 6) + min(10, player.insight // 8)
+    if method is not None:
+        score += _method_duel_score(method)
+    return score
+
+
+def _adventure_event_result(
+    player: Player,
+    method: dict[str, object] | None,
+    roll_value: int,
+) -> dict[str, object] | None:
+    if random.random() > 0.58:
+        return None
+    event = _choose_adventure_event()
+    attributes = _derived_attributes(player, method)
+    combat_score = _adventure_combat_score(player, method, attributes)
+    event_power = int(event["power"]) + max(0, realm_index(player.realm) - 3) * 4
+    event_roll = random.randint(1, 100)
+    total = event_roll + combat_score + roll_value // 6
+    threshold = event_power + 62
+
+    if total >= threshold + 24:
+        outcome = "win"
+        cultivation_delta = random.randint(35, 95) + combat_score // 8
+        spirit_delta = random.randint(18, 60)
+        stamina_delta = 0
+        lifespan_delta = 0
+        death_triggered = False
+        injury_notice = None
+        message = str(event["win"])
+    elif total >= threshold - 12:
+        outcome = "draw"
+        cultivation_delta = random.randint(12, 45)
+        spirit_delta = random.randint(-20, 35)
+        stamina_delta = -1
+        lifespan_delta = 0
+        death_triggered = False
+        injury_notice = "缠斗消耗，额外体力 -1。"
+        message = str(event["draw"])
+    else:
+        outcome = "lose"
+        danger_gap = threshold - total
+        cultivation_delta = -max(20, int(max(player.cultivation, 160) * min(0.09, 0.025 + danger_gap / 900)))
+        spirit_delta = -random.randint(8, 36)
+        stamina_delta = -random.randint(1, 4)
+        lifespan_delta = 0
+        death_triggered = False
+        injury_notice = f"受伤，额外体力 {stamina_delta}。"
+        message = str(event["lose"])
+        if danger_gap >= 52 or (str(event["danger"]) == "极高" and random.random() < 0.22):
+            death_triggered = True
+            cultivation_delta = -max(80, int(max(player.cultivation, 240) * 0.16))
+            spirit_delta = -random.randint(30, 90)
+            stamina_delta = -max(5, player.stamina)
+            lifespan_delta = -random.randint(1, 3)
+            injury_notice = "身死一线，命灯被天道强行续住：体力归零，寿元上限受损。"
+
+    return {
+        "event_name": str(event["name"]),
+        "event_type": str(event["event_type"]),
+        "danger": str(event["danger"]),
+        "outcome": outcome,
+        "roll": event_roll,
+        "total": total,
+        "threshold": threshold,
+        "message": message,
+        "cultivation_delta": cultivation_delta,
+        "spirit_delta": spirit_delta,
+        "stamina_delta": stamina_delta,
+        "lifespan_delta": lifespan_delta,
+        "injury_notice": injury_notice,
+        "death_triggered": death_triggered,
+    }
+
+
+async def _maybe_discover_adventure_method(
+    repo: GameRepository,
+    player: Player,
+    roll_value: int,
+    event_result: dict[str, object] | None,
+) -> str | None:
+    if roll_value < 88:
+        return None
+    chance = 0.012
+    if roll_value >= 104:
+        chance += 0.018
+    if event_result is not None and event_result.get("outcome") == "win":
+        chance += 0.014
+    if event_result is not None and event_result.get("event_name") == "星坠裂隙":
+        chance += 0.025
+    chance += min(0.018, player.rebirth_count * 0.006)
+    chance += min(0.012, player.fortune / 5000)
+    if random.random() >= chance:
+        return None
+
+    candidates: list[dict[str, Any]] = []
+    for method_id in RARE_ADVENTURE_METHOD_IDS:
+        method = await repo.get_method_by_id(method_id)
+        if method is None or method_id in player.method_ids:
+            continue
+        if player.rebirth_count < int(method["required_rebirth_count"]):
+            continue
+        if realm_index(player.realm) < realm_index(Realm(str(method["realm_requirement"]))):
+            continue
+        candidates.append(method)
+    if not candidates:
+        return None
+
+    preferred = [
+        method
+        for method in candidates
+        if Affinity(str(method["affinity"])) in _root_profile_affinities(player)
+    ]
+    method = random.choice(preferred or candidates)
+    if await repo.grant_player_method(player.user_id, str(method["id"])):
+        return str(method["name"])
+    return None
+
+
 def _lifespan_reward_multiplier(player: Player) -> float:
     ratio = player.age / max(player.lifespan, 1)
     if ratio >= 0.95:
@@ -3375,6 +3598,113 @@ async def get_player_methods(user_id: str) -> list[dict[str, object]]:
     return await _load_methods(repo, player)
 
 
+async def get_method_detail_panel(user_id: str, method_name: str | None = None) -> PlayerPanelResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+
+    owned_methods = await _load_methods(repo, player)
+    if method_name is None or not method_name.strip():
+        lines = ["【功法数据】"]
+        if owned_methods:
+            lines.append("已学功法:")
+            for method in owned_methods:
+                mark = " [主修]" if bool(method.get("equipped")) else ""
+                lines.append(
+                    f"- 《{method['name']}》{mark} {method['grade']} {method['method_type']} {method['affinity']}系 | 熟练 {method['mastery']}"
+                )
+        if player.sect_id is not None:
+            options = await list_sect_method_options(user_id)
+            lines.append("宗门可请/待解锁:")
+            for option in options:
+                if option.owned:
+                    continue
+                lines.append(
+                    f"- 《{option.method_name}》[{option.reason}] {option.grade} {option.method_type} {option.affinity}系"
+                )
+        wild_methods = await repo.list_wild_methods()
+        if wild_methods:
+            lines.append("野外稀有传承:")
+            for method in wild_methods:
+                lines.append(
+                    f"- 《{method['name']}》 {method['grade']} {method['method_type']} {method['affinity']}系 | 历练极低概率"
+                )
+        lines.append("查看单本：功法详情 功法名")
+        return PlayerPanelResult(lines=lines)
+
+    method_name = method_name.strip()
+    owned = next((method for method in owned_methods if method_name in {str(method["name"]), str(method["id"])}), None)
+    method = owned
+    if method is None:
+        raw = await repo.get_method_by_name(method_name)
+        if raw is None:
+            raise GameError("method_not_found")
+        raw["mastery"] = 0
+        raw["equipped"] = 0
+        method = _enrich_method(player, raw)
+
+    source_text = "野外历练稀有传承"
+    if method.get("source_sect_id"):
+        sect = await repo.get_sect_by_id(str(method["source_sect_id"]))
+        source_text = "宗门传承" if sect is None else f"{sect['name']}传承"
+    owned_text = "已习得" if owned is not None else "未习得"
+    equipped_text = " | 当前主修" if bool(method.get("equipped")) else ""
+    lines = [
+        f"【功法详情】《{method['name']}》",
+        f"状态: {owned_text}{equipped_text} | 来源: {source_text}",
+        f"品阶: {method['grade']} | 类型: {method['method_type']} | 属性: {method['affinity']} | 风格: {method['style']}",
+        f"需求: {method['realm_requirement']} | 转世 {int(method['required_rebirth_count'])} 转",
+        f"基础: 修炼+{int(float(method['practice_bonus']) * 100)}% | 冲关+{int(float(method['breakthrough_bonus']) * 100)}% | 悟道+{int(float(method['insight_bonus']) * 100)}%",
+        f"当前: 修炼+{int(float(method['practice_total']) * 100)}% | 冲关+{int(method['breakthrough_total'])}% | 悟道+{int(float(method['insight_total']) * 100)}% | 探索+{int(method['adventure_bonus'])}",
+        f"熟练: {int(method['mastery'])} [{method['mastery_title']}]",
+        f"说明: {method['description']}",
+    ]
+    if owned is None and method.get("source_sect_id") is None:
+        lines.append("获取: 历练中极低概率触发完整传承。")
+    elif owned is None:
+        lines.append("获取: 境界、道悟与灵石满足后，发送“请法 功法名”。")
+    return PlayerPanelResult(lines=lines)
+
+
+async def reroll_root_profile(user_id: str) -> RootRerollResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+
+    stamina_cost = 8
+    spirit_cost = 220 + player.rebirth_count * 160
+    if player.stamina < stamina_cost:
+        raise GameError("not_enough_stamina")
+    if player.spirit_stones < spirit_cost:
+        raise GameError(f"not_enough_spirit_stones:{spirit_cost}")
+
+    old_root = _root_brief(player)
+    profile = _generate_root_profile(player.root_type, player.rebirth_count)
+    await repo.update_player_stats(
+        user_id,
+        spirit_stones_delta=-spirit_cost,
+        stamina_delta=-stamina_cost,
+        root_type=profile["root_type"],  # type: ignore[arg-type]
+        root_affinity=profile["root_affinity"],  # type: ignore[arg-type]
+        root_purity=profile["root_purity"],  # type: ignore[arg-type]
+        root_temperament=profile["root_temperament"],  # type: ignore[arg-type]
+        root_trait=profile["root_trait"],  # type: ignore[arg-type]
+        root_profile=profile["root_profile"],  # type: ignore[arg-type]
+    )
+    updated = await repo.get_player(user_id)
+    assert updated is not None
+    return RootRerollResult(
+        spirit_stones_cost=spirit_cost,
+        stamina_cost=stamina_cost,
+        old_root_brief=old_root,
+        new_root_brief=_root_brief(updated),
+        remaining_spirit_stones=updated.spirit_stones,
+        remaining_stamina=updated.stamina,
+    )
+
+
 async def list_sect_method_options(user_id: str) -> list[MethodRequestOption]:
     repo = get_repository()
     player = await repo.get_player(user_id)
@@ -3922,6 +4252,10 @@ async def adventure(user_id: str) -> AdventureResult:
     item_name: str | None = None
     insight_delta = 0
     message: str
+    event_result: dict[str, object] | None = None
+    injury_notice: str | None = None
+    death_triggered = False
+    lifespan_delta = 0
 
     if roll_value <= 18:
         cultivation_gain = -max(18, int(max(player.cultivation, 120) * 0.04))
@@ -3972,6 +4306,19 @@ async def adventure(user_id: str) -> AdventureResult:
                 ("method-fragment", "longevity-fruit", "rebirth-mark", "marrow-jade"),
             )
 
+    event_result = _adventure_event_result(player, primary_method, roll_value)
+    if event_result is not None:
+        message = f"{message} {event_result['message']}"
+        cultivation_gain += int(event_result["cultivation_delta"])
+        spirit_stones_gain += int(event_result["spirit_delta"])
+        if bool(event_result["death_triggered"]):
+            stamina_delta = -player.stamina
+            death_triggered = True
+        else:
+            stamina_delta += int(event_result["stamina_delta"])
+        lifespan_delta += int(event_result["lifespan_delta"])
+        injury_notice = None if event_result["injury_notice"] is None else str(event_result["injury_notice"])
+
     reward_multiplier = _lifespan_reward_multiplier(player)
     if cultivation_gain > 0:
         cultivation_gain = int(cultivation_gain * reward_multiplier)
@@ -3995,6 +4342,13 @@ async def adventure(user_id: str) -> AdventureResult:
             item_name = str(item["name"])
             await repo.add_inventory_item(user_id, item_id, 1)
 
+    reward_method_name = await _maybe_discover_adventure_method(
+        repo,
+        player,
+        roll_value,
+        event_result,
+    )
+
     mastery_gain = settings.method_mastery_adventure_gain + (1 if roll_value >= 88 else 0)
     mastery_method_name, applied_mastery = await _apply_method_mastery(
         repo,
@@ -4009,12 +4363,13 @@ async def adventure(user_id: str) -> AdventureResult:
         cultivation_delta=cultivation_gain,
         stamina_delta=stamina_delta,
         insight_delta=insight_delta,
+        lifespan_delta=lifespan_delta,
     )
     await repo.record_adventure(
         user_id,
         action_type="adventure",
         roll_value=roll_value,
-        outcome=message,
+        outcome=message if reward_method_name is None else f"{message} 得稀有功法《{reward_method_name}》。",
         reward_spirit_stones=spirit_stones_gain,
         reward_cultivation=cultivation_gain,
         reward_item_id=item_id,
@@ -4040,6 +4395,11 @@ async def adventure(user_id: str) -> AdventureResult:
         insight_delta=insight_delta,
         lifespan_notice=lifespan_notice,
         event_notice=event_notice,
+        event_type=None if event_result is None else str(event_result["event_type"]),
+        danger_level=None if event_result is None else str(event_result["danger"]),
+        injury_notice=injury_notice,
+        death_triggered=death_triggered,
+        reward_method_name=reward_method_name,
     )
 
 

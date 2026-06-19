@@ -37,6 +37,7 @@ from xianbot.services import (
     explore_map_area,
     get_attribute_panel,
     get_player_panel,
+    get_method_detail_panel,
     get_player_methods,
     get_recent_actions,
     get_player_status,
@@ -52,6 +53,7 @@ from xianbot.services import (
     list_sects_for_player,
     rebirth,
     request_sect_method,
+    reroll_root_profile,
     set_primary_method,
     sign_in,
     start_meditation,
@@ -76,8 +78,10 @@ sect_list_cmd = on_command("宗门列表", aliases={"宗门", "sects"})
 rebirth_cmd = on_command("转世", aliases={"轮回", "rebirth"})
 join_sect_cmd = on_command("加入宗门", aliases={"拜入宗门", "join_sect"})
 methods_cmd = on_command("我的功法", aliases={"宗门传承", "功法", "methods"})
+method_detail_cmd = on_command("功法详情", aliases={"查看功法", "功法数据", "method_detail"})
 request_method_cmd = on_command("请法", aliases={"求法", "领取功法", "传功", "request_method"})
 primary_method_cmd = on_command("主修功法", aliases={"切换主修", "主修", "set_method"})
+reroll_root_cmd = on_command("重骰灵根", aliases={"洗灵根", "重roll", "reroll", "roll灵根"})
 inventory_cmd = on_command("背包", aliases={"包裹", "物品", "bag", "inv"})
 artifacts_cmd = on_command("我的法宝", aliases={"法宝", "artifacts"})
 equip_artifact_cmd = on_command("装备法宝", aliases={"装备", "equip"})
@@ -480,6 +484,21 @@ async def handle_methods(event: Event) -> None:
     await methods_cmd.finish("\n".join(lines))
 
 
+@method_detail_cmd.handle()
+async def handle_method_detail(event: Event, args: Message = CommandArg()) -> None:
+    method_name = args.extract_plain_text().strip() or None
+    try:
+        result = await get_method_detail_panel(event.get_user_id(), method_name)
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await method_detail_cmd.finish("你还未入道，发送“入道 青玄”开始。")
+        if reason == "method_not_found":
+            await method_detail_cmd.finish("未找到这门功法。可发送“功法详情”查看已学、宗门和野外稀有传承。")
+        raise
+    await method_detail_cmd.finish("\n".join(result.lines))
+
+
 @request_method_cmd.handle()
 async def handle_request_method(event: Event, args: Message = CommandArg()) -> None:
     method_name = args.extract_plain_text().strip()
@@ -538,6 +557,28 @@ async def handle_request_method(event: Event, args: Message = CommandArg()) -> N
         f"请法成功，习得《{result.method_name}》[{result.grade}/{result.method_type}/{result.affinity}系]。"
         f"消耗灵石 {result.spirit_stones_cost}、道悟 {result.insight_cost}。"
         f"剩余灵石 {result.remaining_spirit_stones}、道悟 {result.remaining_insight}。{primary_note}"
+    )
+
+
+@reroll_root_cmd.handle()
+async def handle_reroll_root(event: Event) -> None:
+    try:
+        result = await reroll_root_profile(event.get_user_id())
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await reroll_root_cmd.finish("你还未入道，发送“入道 青玄”开始。")
+        if reason == "not_enough_stamina":
+            await reroll_root_cmd.finish("体力不足，重骰灵根需要体力 8。")
+        if reason.startswith("not_enough_spirit_stones:"):
+            await reroll_root_cmd.finish(f"灵石不足，重骰灵根需要灵石 {reason.split(':', 1)[1]}。")
+        raise
+    await reroll_root_cmd.finish(
+        "灵根重骰完成。\n"
+        f"原灵根: {result.old_root_brief}\n"
+        f"新灵根: {result.new_root_brief}\n"
+        f"消耗灵石 {result.spirit_stones_cost}、体力 {result.stamina_cost}。"
+        f"剩余灵石 {result.remaining_spirit_stones}，体力 {result.remaining_stamina}/100。"
     )
 
 
@@ -636,7 +677,15 @@ async def handle_adventure(event: Event) -> None:
         reward_line += f" 道悟 {result.insight_delta:+}。"
     if result.reward_item_name:
         reward_line += f" 额外获得 {result.reward_item_name}。"
+    if result.reward_method_name:
+        reward_line += f" 领悟稀有功法《{result.reward_method_name}》。"
     lines = [f"[{result.world_title}] {result.message}", f"roll={result.roll_value}", reward_line]
+    if result.event_type:
+        lines.append(f"触发{result.event_type}事件 | 危险 {result.danger_level}。")
+    if result.injury_notice:
+        lines.append(result.injury_notice)
+    if result.death_triggered:
+        lines.append("你这次几乎身死道消，虽然角色没有删除，但已经付出重伤代价。")
     if result.mastery_method_name and result.mastery_gain:
         lines.append(f"《{result.mastery_method_name}》熟练 +{result.mastery_gain}。")
     if result.lifespan_notice:

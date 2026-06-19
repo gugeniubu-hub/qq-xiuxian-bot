@@ -849,6 +849,54 @@ class GameRepository:
             )
         return None if row is None else dict(row)
 
+    async def get_method_by_name(self, method_name: str) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT
+                  id, name, realm_requirement, grade, method_type, affinity, style,
+                  practice_bonus, breakthrough_bonus, insight_bonus,
+                  source_sect_id, required_rebirth_count, description
+                FROM cultivation_methods
+                WHERE name = ? OR id = ?
+                """,
+                (method_name, method_name),
+            )
+        return None if row is None else dict(row)
+
+    async def get_method_by_id(self, method_id: str) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            row = await self._fetchone(
+                db,
+                """
+                SELECT
+                  id, name, realm_requirement, grade, method_type, affinity, style,
+                  practice_bonus, breakthrough_bonus, insight_bonus,
+                  source_sect_id, required_rebirth_count, description
+                FROM cultivation_methods
+                WHERE id = ?
+                """,
+                (method_id,),
+            )
+        return None if row is None else dict(row)
+
+    async def list_wild_methods(self) -> list[dict[str, Any]]:
+        async with self._connect() as db:
+            rows = await self._fetchall(
+                db,
+                """
+                SELECT
+                  id, name, realm_requirement, grade, method_type, affinity, style,
+                  practice_bonus, breakthrough_bonus, insight_bonus,
+                  source_sect_id, required_rebirth_count, description
+                FROM cultivation_methods
+                WHERE source_sect_id IS NULL
+                ORDER BY required_rebirth_count, realm_requirement, grade, name
+                """,
+            )
+        return [dict(row) for row in rows]
+
     async def get_sect_methods(
         self,
         sect_id: str,

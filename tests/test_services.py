@@ -22,6 +22,7 @@ from xianbot.services import (
     end_meditation,
     explore_ancient_trial,
     explore_map_area,
+    get_method_detail_panel,
     get_attribute_panel,
     get_destiny_status,
     get_player_panel,
@@ -38,6 +39,7 @@ from xianbot.services import (
     list_inventory,
     consume_item,
     request_sect_method,
+    reroll_root_profile,
     set_primary_method,
     sign_in,
     start_meditation,
@@ -715,6 +717,111 @@ def test_concurrent_method_request_charges_once(tmp_path, monkeypatch) -> None:
         assert after.insight == 30 - option.insight_cost
         methods = await get_player_methods("72002")
         assert [method["name"] for method in methods].count("青岚养心篇") == 1
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_adventure_event_can_injure_and_award_wild_method(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian_adventure_event.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("72003", "wildling")
+        repo = GameRepository(get_settings().database_url)
+        await repo.update_player_stats(
+            "72003",
+            realm=Realm.FOUNDATION_4,
+            cultivation_delta=1800,
+            spirit_stones_delta=400,
+        )
+
+        import xianbot.services as services
+
+        original_event = services._adventure_event_result
+        original_discover = services._maybe_discover_adventure_method
+        original_randint = services.random.randint
+        services.random.randint = lambda a, b: b
+
+        def fake_event(player, method, roll_value):
+            return {
+                "event_name": "妖兽王游猎",
+                "event_type": "野怪",
+                "danger": "高",
+                "outcome": "lose",
+                "roll": 1,
+                "total": 1,
+                "threshold": 100,
+                "message": "妖兽王一撞如山崩，你几乎被震断气海。",
+                "cultivation_delta": -60,
+                "spirit_delta": -20,
+                "stamina_delta": -3,
+                "lifespan_delta": -1,
+                "injury_notice": "受伤，额外体力 -3。",
+                "death_triggered": False,
+            }
+
+        async def fake_discover(repo, player, roll_value, event_result):
+            granted = await repo.grant_player_method(player.user_id, "beast-body-wild")
+            return "万兽炼体经" if granted else None
+
+        services._adventure_event_result = fake_event
+        services._maybe_discover_adventure_method = fake_discover
+        try:
+            result = await adventure("72003")
+        finally:
+            services._adventure_event_result = original_event
+            services._maybe_discover_adventure_method = original_discover
+            services.random.randint = original_randint
+
+        assert result.event_type == "野怪"
+        assert result.danger_level == "高"
+        assert result.injury_notice == "受伤，额外体力 -3。"
+        assert result.reward_method_name == "万兽炼体经"
+        assert result.stamina_delta == -15
+
+        player = await get_player_status("72003")
+        assert player is not None
+        assert player.stamina == 85
+        assert player.lifespan < 120
+        methods = await get_player_methods("72003")
+        assert any(method["name"] == "万兽炼体经" for method in methods)
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_method_detail_and_root_reroll(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian_method_detail.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("72004", "viewer")
+        await join_sect("72004", "青岚宗")
+        repo = GameRepository(get_settings().database_url)
+        await repo.update_player_stats("72004", spirit_stones_delta=500)
+
+        overview = await get_method_detail_panel("72004")
+        overview_text = "\n".join(overview.lines)
+        assert "野外稀有传承" in overview_text
+        assert "玄霜封魂录" in overview_text
+
+        detail = await get_method_detail_panel("72004", "吐纳诀")
+        detail_text = "\n".join(detail.lines)
+        assert "【功法详情】《吐纳诀》" in detail_text
+        assert "当前:" in detail_text
+
+        before = await get_player_status("72004")
+        assert before is not None
+        rerolled = await reroll_root_profile("72004")
+        assert rerolled.spirit_stones_cost == 220
+        assert rerolled.remaining_stamina == before.stamina - 8
+        assert rerolled.old_root_brief != ""
+        assert rerolled.new_root_brief != ""
 
     asyncio.run(scenario())
     get_settings.cache_clear()
@@ -1564,13 +1671,13 @@ def test_custom_dao_name_attributes_and_map_exploration(tmp_path, monkeypatch) -
         assert result.area_name == "青岚山"
         assert result.roll_value > 100
         assert result.cultivation_delta > 0
-        assert result.stamina_delta == -12
+        assert result.stamina_delta == -8
         assert result.attribute_used == "悟性"
         assert result.root_bonus > 0
 
         refreshed = await get_player_status("94001")
         assert refreshed is not None
-        assert refreshed.stamina == 88
+        assert refreshed.stamina == 92
         assert refreshed.cultivation >= player.cultivation + result.cultivation_delta
 
         other_refreshed = await get_player_status("94002")
