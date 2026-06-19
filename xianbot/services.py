@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 import re
 from dataclasses import dataclass, field
@@ -69,19 +70,40 @@ ROOT_TYPE_ORDER: tuple[RootType, ...] = (
 )
 
 ROOT_AFFINITY_ROLLS: tuple[tuple[int, Affinity], ...] = (
-    (16, Affinity.METAL),
-    (32, Affinity.WOOD),
-    (48, Affinity.WATER),
-    (64, Affinity.FIRE),
-    (80, Affinity.EARTH),
-    (91, Affinity.WIND),
-    (100, Affinity.THUNDER),
+    (14, Affinity.METAL),
+    (28, Affinity.WOOD),
+    (42, Affinity.WATER),
+    (56, Affinity.FIRE),
+    (70, Affinity.EARTH),
+    (82, Affinity.WIND),
+    (91, Affinity.THUNDER),
+    (100, Affinity.ICE),
 )
 
 AFFINITY_RARE_OFFSETS: dict[Affinity, int] = {
     Affinity.WIND: 2,
     Affinity.THUNDER: 4,
+    Affinity.ICE: 4,
     Affinity.VOID: 6,
+}
+
+VARIANT_ROOT_COMPONENTS: dict[Affinity, tuple[Affinity, ...]] = {
+    Affinity.WIND: (Affinity.WOOD, Affinity.METAL),
+    Affinity.THUNDER: (Affinity.FIRE, Affinity.METAL),
+    Affinity.ICE: (Affinity.WATER, Affinity.METAL),
+    Affinity.VOID: (Affinity.WATER, Affinity.THUNDER),
+}
+
+ROOT_COMPATIBLE_AFFINITIES: dict[Affinity, tuple[Affinity, ...]] = {
+    Affinity.METAL: (Affinity.WATER, Affinity.EARTH, Affinity.WIND),
+    Affinity.WOOD: (Affinity.WATER, Affinity.FIRE, Affinity.WIND),
+    Affinity.WATER: (Affinity.WOOD, Affinity.METAL, Affinity.ICE),
+    Affinity.FIRE: (Affinity.EARTH, Affinity.THUNDER, Affinity.WOOD),
+    Affinity.EARTH: (Affinity.METAL, Affinity.FIRE, Affinity.WOOD),
+    Affinity.WIND: (Affinity.WOOD, Affinity.METAL, Affinity.WATER),
+    Affinity.THUNDER: (Affinity.FIRE, Affinity.METAL, Affinity.WIND),
+    Affinity.ICE: (Affinity.WATER, Affinity.METAL, Affinity.WIND),
+    Affinity.VOID: (Affinity.WATER, Affinity.THUNDER, Affinity.WIND),
 }
 
 ROOT_TEMPERAMENT_ROLLS: tuple[tuple[int, RootTemperament], ...] = (
@@ -185,6 +207,7 @@ ARTIFACT_DROP_TABLE: dict[Affinity, tuple[str, ...]] = {
     Affinity.EARTH: ("artifact-cloud-bell", "artifact-iron-sword"),
     Affinity.WIND: ("artifact-wind-boots", "artifact-cloud-bell"),
     Affinity.THUNDER: ("artifact-thunder-banner", "artifact-wind-boots"),
+    Affinity.ICE: ("artifact-mirror-jade", "artifact-cloud-bell"),
     Affinity.VOID: ("artifact-mirror-jade", "artifact-thunder-banner"),
 }
 
@@ -443,13 +466,14 @@ ALCHEMY_RECIPES: tuple[dict[str, Any], ...] = (
 DAO_NAME_PATTERN = re.compile(r"^[0-9A-Za-z_\-\u4e00-\u9fff·]{2,12}$")
 
 AFFINITY_ROLE_TEXT: dict[Affinity, str] = {
-    Affinity.METAL: "攻伐、法宝、破防",
+    Affinity.METAL: "物攻、法宝、破防",
     Affinity.WOOD: "修炼、气血、灵材",
     Affinity.WATER: "悟道、炼丹、续航",
     Affinity.FIRE: "历练、爆发、冲关",
-    Affinity.EARTH: "护身、稳固、突破",
-    Affinity.WIND: "身法、奇遇、探索",
+    Affinity.EARTH: "物防、气血、突破",
+    Affinity.WIND: "速度、奇遇、探索",
     Affinity.THUNDER: "斗法、爆发、天关",
+    Affinity.ICE: "法攻、法防、控制",
     Affinity.VOID: "悟道、轮回、古藏",
 }
 
@@ -463,7 +487,7 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "stamina_cost": 12,
         "risk": 0,
         "favored_affinities": (Affinity.WOOD, Affinity.WATER),
-        "focus_attribute": "灵力",
+        "focus_attribute": "悟性",
         "focus": "修炼 / 灵材",
         "reward_brief": "灵草、灵泉水、稳定修为",
         "description": "入门历练地，灵气平稳，适合新道友攒第一批灵材。",
@@ -483,7 +507,7 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "required_realm": Realm.QI_2,
         "stamina_cost": 14,
         "risk": 4,
-        "favored_affinities": (Affinity.WATER, Affinity.WOOD),
+        "favored_affinities": (Affinity.WATER, Affinity.WOOD, Affinity.ICE),
         "focus_attribute": "丹道",
         "focus": "炼丹 / 悟道",
         "reward_brief": "灵泉水、月华粉、道悟",
@@ -526,9 +550,9 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "stamina_cost": 16,
         "risk": 7,
         "favored_affinities": (Affinity.METAL, Affinity.EARTH, Affinity.FIRE),
-        "focus_attribute": "攻伐",
+        "focus_attribute": "物攻",
         "focus": "法宝 / 斗法",
-        "reward_brief": "法宝线索、灵石、残篇",
+        "reward_brief": "法宝线索、灵石、悟道札记",
         "description": "地火炼铁，容易捡到法宝线索，也需要能打能扛。",
         "loot": ("method-fragment", "essence-pill", "flame-sand", "artifact-iron-sword"),
         "cultivation_range": (100, 190),
@@ -547,10 +571,10 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "stamina_cost": 18,
         "risk": 10,
         "favored_affinities": (Affinity.WIND, Affinity.WATER, Affinity.WOOD),
-        "focus_attribute": "身法",
+        "focus_attribute": "速度",
         "focus": "奇遇 / 福缘",
-        "reward_brief": "吐纳残篇、福缘、寿元灵果",
-        "description": "风势无常，身法越好越能抓住一闪而逝的机缘。",
+        "reward_brief": "悟道札记、福缘、寿元灵果",
+        "description": "风势无常，速度越好越能抓住一闪而逝的机缘。",
         "loot": ("method-fragment", "longevity-fruit", "clear-dew", "moon-dust"),
         "cultivation_range": (120, 230),
         "spirit_range": (70, 155),
@@ -588,10 +612,10 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "required_realm": Realm.CORE_1,
         "stamina_cost": 22,
         "risk": 18,
-        "favored_affinities": (Affinity.VOID, Affinity.THUNDER, Affinity.WIND),
+        "favored_affinities": (Affinity.VOID, Affinity.THUNDER, Affinity.WIND, Affinity.ICE),
         "focus_attribute": "悟道",
         "focus": "二转 / 古藏",
-        "reward_brief": "古传残篇、洗髓玉、稀有法宝",
+        "reward_brief": "悟道札记、洗髓玉、稀有法宝",
         "description": "二转后方能听见古域回响，适合冲古传承与后期构筑。",
         "loot": ("method-fragment", "marrow-jade", "rebirth-mark", "artifact-mirror-jade"),
         "cultivation_range": (190, 340),
@@ -602,6 +626,24 @@ MAP_AREAS: tuple[dict[str, Any], ...] = (
         "lifespan_progress": 3,
     },
 )
+
+METHOD_REQUEST_COSTS: dict[MethodGrade, tuple[int, int]] = {
+    MethodGrade.COMMON: (0, 0),
+    MethodGrade.YELLOW: (160, 2),
+    MethodGrade.MYSTIC: (520, 6),
+    MethodGrade.EARTH: (1200, 14),
+    MethodGrade.HEAVEN: (2200, 24),
+    MethodGrade.ANCIENT: (3200, 30),
+}
+
+METHOD_REQUEST_REALM_SPIRIT_STEP: dict[MethodGrade, int] = {
+    MethodGrade.COMMON: 0,
+    MethodGrade.YELLOW: 40,
+    MethodGrade.MYSTIC: 90,
+    MethodGrade.EARTH: 140,
+    MethodGrade.HEAVEN: 220,
+    MethodGrade.ANCIENT: 260,
+}
 
 
 class GameError(ValueError):
@@ -633,6 +675,37 @@ class RebirthResult:
 class JoinSectResult:
     sect_name: str
     method_name: str | None
+
+
+@dataclass(slots=True)
+class MethodRequestOption:
+    method_id: str
+    method_name: str
+    grade: str
+    method_type: str
+    affinity: str
+    style: str
+    realm_requirement: str
+    required_rebirth_count: int
+    spirit_stones_cost: int
+    insight_cost: int
+    owned: bool
+    available: bool
+    reason: str | None = None
+
+
+@dataclass(slots=True)
+class MethodRequestResult:
+    method_name: str
+    grade: str
+    method_type: str
+    affinity: str
+    style: str
+    spirit_stones_cost: int
+    insight_cost: int
+    remaining_spirit_stones: int
+    remaining_insight: int
+    set_as_primary: bool
 
 
 @dataclass(slots=True)
@@ -913,6 +986,22 @@ def _parse_timestamp(value: str) -> datetime:
     return datetime.fromisoformat(normalized)
 
 
+def _stamina_recovery_hint(player: Player) -> str:
+    if player.stamina >= 100:
+        return ""
+    settings = get_settings()
+    amount = max(1, int(settings.stamina_recover_amount))
+    interval = max(1, int(settings.stamina_recover_interval_seconds))
+    missing = 100 - player.stamina
+    seconds = ((missing + amount - 1) // amount) * interval
+    minutes = max(1, seconds // 60)
+    if minutes < 60:
+        return f" | 约{minutes}分钟回满"
+    hours = minutes // 60
+    rest = minutes % 60
+    return f" | 约{hours}小时{rest}分钟回满"
+
+
 def _root_rank(root_type: RootType) -> int:
     return ROOT_TYPE_ORDER.index(root_type)
 
@@ -1001,9 +1090,18 @@ async def _set_action_cooldown(repo: GameRepository, user_id: str, action_type: 
 
 
 def _root_rarity_brief(player: Player) -> str:
+    profile = _root_profile(player)
+    variant = profile.get("variant")
+    if variant:
+        return f"{variant}灵根"
+    pattern = profile.get("pattern")
+    if pattern and pattern != "单":
+        return str(profile.get("label"))
     rare_bias = AFFINITY_RARE_OFFSETS.get(player.root_affinity, 0)
     if player.root_affinity == Affinity.VOID:
         return "虚灵根"
+    if player.root_affinity == Affinity.ICE:
+        return "冰灵根"
     if player.root_affinity == Affinity.THUNDER:
         return "雷灵根"
     if player.root_affinity == Affinity.WIND:
@@ -1019,6 +1117,96 @@ def _weighted_choice(table: tuple[tuple[int, Any], ...], roll: int | None = None
         if value <= threshold:
             return result
     return table[-1][1]
+
+
+def _root_pattern_name(count: int, variant: Affinity | None = None) -> str:
+    if variant is not None:
+        return "变异"
+    return {
+        1: "单",
+        2: "双",
+        3: "三",
+        4: "四",
+        5: "五行",
+    }.get(count, "多")
+
+
+def _encode_root_profile(
+    primary: Affinity,
+    elements: tuple[Affinity, ...],
+    *,
+    variant: Affinity | None = None,
+) -> str:
+    pattern = _root_pattern_name(len(elements), variant)
+    if variant is not None:
+        label = f"{variant.value}灵根"
+    elif len(elements) == 5:
+        label = "五行灵根"
+    else:
+        label = f"{''.join(item.value for item in elements)}{pattern}灵根"
+    return json.dumps(
+        {
+            "primary": primary.value,
+            "elements": [item.value for item in elements],
+            "variant": None if variant is None else variant.value,
+            "pattern": pattern,
+            "label": label,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _fallback_root_profile(player: Player) -> dict[str, object]:
+    variant = player.root_affinity if player.root_affinity in VARIANT_ROOT_COMPONENTS else None
+    elements = VARIANT_ROOT_COMPONENTS.get(player.root_affinity, (player.root_affinity,))
+    return json.loads(_encode_root_profile(player.root_affinity, elements, variant=variant))
+
+
+def _root_profile(player: Player) -> dict[str, object]:
+    if player.root_profile:
+        try:
+            profile = json.loads(player.root_profile)
+        except json.JSONDecodeError:
+            return _fallback_root_profile(player)
+        if isinstance(profile, dict) and profile.get("primary") and profile.get("elements"):
+            if str(profile.get("primary")) != player.root_affinity.value:
+                return _fallback_root_profile(player)
+            return profile
+    return _fallback_root_profile(player)
+
+
+def _root_profile_affinities(player: Player) -> tuple[Affinity, ...]:
+    profile = _root_profile(player)
+    raw_values = [profile.get("primary"), *list(profile.get("elements", []))]
+    affinities: list[Affinity] = []
+    for raw in raw_values:
+        try:
+            affinity = Affinity(str(raw))
+        except ValueError:
+            continue
+        if affinity not in affinities:
+            affinities.append(affinity)
+    return tuple(affinities) or (player.root_affinity,)
+
+
+def _root_profile_label(player: Player) -> str:
+    return str(_root_profile(player).get("label") or f"{player.root_affinity.value}灵根")
+
+
+def _roll_root_profile_affinities(primary: Affinity, rebirth_count: int) -> tuple[Affinity, ...]:
+    if primary in VARIANT_ROOT_COMPONENTS:
+        return VARIANT_ROOT_COMPONENTS[primary]
+    roll = random.randint(1, 100)
+    dual_threshold = 72 - min(10, rebirth_count * 2)
+    triple_threshold = 94 - min(8, rebirth_count * 2)
+    if roll <= dual_threshold:
+        return (primary,)
+    candidates = [item for item in ROOT_COMPATIBLE_AFFINITIES[primary] if item not in VARIANT_ROOT_COMPONENTS]
+    random.shuffle(candidates)
+    if roll <= triple_threshold:
+        return tuple([primary, *candidates[:1]])
+    return tuple([primary, *candidates[:2]])
 
 
 def _player_with_updates(player: Player, **changes: object) -> Player:
@@ -1041,12 +1229,12 @@ def roll_root_type(root_floor: RootType | None = None) -> RootType:
 
 def _roll_root_affinity(rebirth_count: int) -> Affinity:
     roll = random.randint(1, 100)
-    if rebirth_count >= 3 and roll >= 93:
-        return random.choice([Affinity.THUNDER, Affinity.VOID])
+    if rebirth_count >= 3 and roll >= 90:
+        return random.choice([Affinity.WIND, Affinity.THUNDER, Affinity.ICE])
     if rebirth_count >= 2 and roll >= 88:
-        return random.choice([Affinity.WIND, Affinity.THUNDER, Affinity.VOID])
+        return random.choice([Affinity.WIND, Affinity.THUNDER, Affinity.ICE])
     if rebirth_count >= 1 and roll >= 84:
-        return random.choice([Affinity.WIND, Affinity.THUNDER])
+        return random.choice([Affinity.WIND, Affinity.THUNDER, Affinity.ICE])
     return _weighted_choice(ROOT_AFFINITY_ROLLS, roll=roll)
 
 
@@ -1067,6 +1255,8 @@ def _generate_root_profile(
         purity_max = min(99, purity_max + min(10, rebirth_count * 3))
     root_purity = min(99, random.randint(purity_min, purity_max) + rebirth_count)
     root_affinity = _roll_root_affinity(rebirth_count)
+    root_elements = _roll_root_profile_affinities(root_affinity, rebirth_count)
+    root_variant = root_affinity if root_affinity in VARIANT_ROOT_COMPONENTS else None
     root_temperament = _weighted_choice(ROOT_TEMPERAMENT_ROLLS)
     root_trait = _roll_root_trait(rebirth_count)
     return {
@@ -1075,6 +1265,11 @@ def _generate_root_profile(
         "root_purity": root_purity,
         "root_temperament": root_temperament,
         "root_trait": root_trait,
+        "root_profile": _encode_root_profile(
+            root_affinity,
+            root_elements,
+            variant=root_variant,
+        ),
     }
 
 
@@ -1289,12 +1484,15 @@ def _root_loot_choice(
         Affinity.METAL: ("essence-pill", "method-fragment", "rebirth-mark"),
         Affinity.WIND: ("method-fragment", "clear-dew", "longevity-fruit"),
         Affinity.THUNDER: ("rebirth-mark", "flame-sand", "marrow-jade"),
+        Affinity.ICE: ("clear-dew", "moon-dust", "insight-pill"),
         Affinity.VOID: ("method-fragment", "moon-dust", "marrow-jade", "rebirth-mark"),
     }
     repeat = 2 + min(2, max(0, player.rebirth_count))
-    for preferred in preferences.get(player.root_affinity, ()):
-        if preferred in options:
-            weighted.extend([preferred] * repeat)
+    for affinity in _root_profile_affinities(player):
+        affinity_repeat = repeat if affinity == player.root_affinity else max(1, repeat - 1)
+        for preferred in preferences.get(affinity, ()):
+            if preferred in options:
+                weighted.extend([preferred] * affinity_repeat)
     if player.root_trait == RootTrait.WANDERING and "method-fragment" in options:
         weighted.extend(["method-fragment"] * 2)
     if player.root_trait == RootTrait.EMBER and "rebirth-mark" in options:
@@ -1320,6 +1518,8 @@ def _artifact_drop_choice(player: Player) -> str:
 def _root_affinity_duel_bonus(player: Player) -> int:
     if player.root_affinity == Affinity.THUNDER:
         return 6
+    if player.root_affinity == Affinity.ICE:
+        return 5
     if player.root_affinity == Affinity.FIRE:
         return 4
     if player.root_affinity == Affinity.WIND:
@@ -1408,6 +1608,7 @@ def _method_totals(player: Player, method: dict[str, object]) -> dict[str, float
     style_modifiers = _method_style_modifiers(player, method)
     affinity_bias = affinity_method_bias(player.root_affinity, affinity)
     specialization_bonus = affinity_specialization_bonus(player.root_affinity, affinity)
+    secondary_affinity_match = affinity != player.root_affinity and affinity in _root_profile_affinities(player)
     practice = (
         float(method["practice_bonus"])
         + method_grade_practice_bonus(grade)
@@ -1416,6 +1617,7 @@ def _method_totals(player: Player, method: dict[str, object]) -> dict[str, float
         + float(style_modifiers["practice"])
         + float(affinity_bias["practice"])
         + float(specialization_bonus["practice"])
+        + (0.04 if secondary_affinity_match else 0.0)
     )
     breakthrough = (
         int(float(method["breakthrough_bonus"]) * 100)
@@ -1425,6 +1627,7 @@ def _method_totals(player: Player, method: dict[str, object]) -> dict[str, float
         + int(style_modifiers["breakthrough"])
         + int(affinity_bias["breakthrough"])
         + int(specialization_bonus["breakthrough"])
+        + (2 if secondary_affinity_match else 0)
     )
     insight = (
         float(method.get("insight_bonus", 0.0))
@@ -1433,6 +1636,7 @@ def _method_totals(player: Player, method: dict[str, object]) -> dict[str, float
         + float(style_modifiers["insight"])
         + float(affinity_bias["insight"])
         + float(specialization_bonus["insight"])
+        + (0.02 if secondary_affinity_match else 0.0)
     )
     return {
         "practice": practice,
@@ -1442,8 +1646,87 @@ def _method_totals(player: Player, method: dict[str, object]) -> dict[str, float
             int(style_modifiers["adventure"])
             + int(affinity_bias["adventure"])
             + int(specialization_bonus["adventure"])
+            + (1 if secondary_affinity_match else 0)
         ),
     }
+
+
+def _method_sort_key(method: dict[str, object]) -> tuple[int, int, str]:
+    grade_order = {
+        MethodGrade.COMMON: 0,
+        MethodGrade.YELLOW: 1,
+        MethodGrade.MYSTIC: 2,
+        MethodGrade.EARTH: 3,
+        MethodGrade.HEAVEN: 4,
+        MethodGrade.ANCIENT: 5,
+    }
+    realm = Realm(str(method["realm_requirement"]))
+    grade = MethodGrade(str(method["grade"]))
+    return realm_index(realm), grade_order[grade], str(method["name"])
+
+
+def _method_request_cost(player: Player, method: dict[str, object]) -> tuple[int, int]:
+    grade = MethodGrade(str(method["grade"]))
+    base_spirit, base_insight = METHOD_REQUEST_COSTS[grade]
+    realm_tier = realm_index(Realm(str(method["realm_requirement"]))) // 4
+    spirit_cost = base_spirit + realm_tier * METHOD_REQUEST_REALM_SPIRIT_STEP[grade]
+    insight_cost = base_insight + max(0, realm_tier - 1)
+
+    affinity = Affinity(str(method["affinity"]))
+    if affinity in _root_profile_affinities(player):
+        spirit_cost = int(spirit_cost * 0.9)
+        insight_cost = max(0, insight_cost - 1)
+    elif affinity != player.root_affinity and grade != MethodGrade.COMMON:
+        spirit_cost = int(spirit_cost * 1.08)
+
+    if MethodStyle(str(method["style"])) == MethodStyle.REBIRTH and player.rebirth_count > 0:
+        insight_cost = max(0, insight_cost - min(2, player.rebirth_count))
+
+    return max(0, spirit_cost), max(0, insight_cost)
+
+
+def _method_request_option(
+    player: Player,
+    method: dict[str, object],
+    owned_method_ids: set[str],
+) -> MethodRequestOption:
+    method_id = str(method["id"])
+    required_realm = Realm(str(method["realm_requirement"]))
+    required_rebirth_count = int(method["required_rebirth_count"])
+    spirit_cost, insight_cost = _method_request_cost(player, method)
+
+    owned = method_id in owned_method_ids
+    available = False
+    reason: str | None = None
+    if owned:
+        reason = "已习得"
+    elif player.rebirth_count < required_rebirth_count:
+        reason = f"需{required_rebirth_count}转"
+    elif realm_index(player.realm) < realm_index(required_realm):
+        reason = f"需{required_realm.value}"
+    elif player.spirit_stones < spirit_cost:
+        reason = f"灵石不足({player.spirit_stones}/{spirit_cost})"
+    elif player.insight < insight_cost:
+        reason = f"道悟不足({player.insight}/{insight_cost})"
+    else:
+        available = True
+        reason = "可请"
+
+    return MethodRequestOption(
+        method_id=method_id,
+        method_name=str(method["name"]),
+        grade=str(method["grade"]),
+        method_type=str(method["method_type"]),
+        affinity=str(method["affinity"]),
+        style=str(method["style"]),
+        realm_requirement=required_realm.value,
+        required_rebirth_count=required_rebirth_count,
+        spirit_stones_cost=spirit_cost,
+        insight_cost=insight_cost,
+        owned=owned,
+        available=available,
+        reason=reason,
+    )
 
 
 def _enrich_method(player: Player, method: dict[str, object]) -> dict[str, object]:
@@ -1495,7 +1778,7 @@ def _lifespan_for_profile(root_type: RootType, root_trait: RootTrait) -> int:
 
 
 def _root_brief(player: Player) -> str:
-    return f"{player.root_type.value}·{player.root_affinity.value}系·纯度{player.root_purity}·{player.root_temperament.value}/{player.root_trait.value}"
+    return f"{player.root_type.value}·{_root_profile_label(player)}·纯度{player.root_purity}·{player.root_temperament.value}/{player.root_trait.value}"
 
 
 def _root_growth_brief(player: Player) -> str:
@@ -1572,74 +1855,170 @@ def _derived_attributes(
     method_insight = 0 if method is None else int(float(method.get("insight_total", 0.0)) * 100)
     method_breakthrough = 0 if method is None else int(method.get("breakthrough_total", 0))
     method_mastery = 0 if method is None else int(method.get("mastery", 0))
+    method_type = None if method is None else MethodType(str(method["method_type"]))
+    method_style = None if method is None else MethodStyle(str(method["style"]))
+    affinities = _root_profile_affinities(player)
 
-    attack_bias = {
-        Affinity.METAL: 9,
-        Affinity.FIRE: 10,
-        Affinity.THUNDER: 13,
-        Affinity.WIND: 5,
-    }.get(player.root_affinity, 0)
-    guard_bias = {
-        Affinity.EARTH: 12,
-        Affinity.WATER: 8,
-        Affinity.WOOD: 7,
-        Affinity.METAL: 5,
-    }.get(player.root_affinity, 0)
-    speed_bias = {
-        Affinity.WIND: 14,
-        Affinity.THUNDER: 7,
-        Affinity.WATER: 5,
-        Affinity.VOID: 5,
-    }.get(player.root_affinity, 0)
-    spirit_bias = {
-        Affinity.WOOD: 12,
-        Affinity.WATER: 8,
-        Affinity.EARTH: 6,
-        Affinity.VOID: 6,
-    }.get(player.root_affinity, 0)
-    insight_bias = {
-        Affinity.WATER: 12,
-        Affinity.VOID: 15,
-        Affinity.WIND: 6,
-        Affinity.WOOD: 5,
-    }.get(player.root_affinity, 0)
-    breakthrough_bias = {
-        Affinity.FIRE: 10,
-        Affinity.THUNDER: 14,
-        Affinity.EARTH: 9,
-        Affinity.METAL: 6,
-    }.get(player.root_affinity, 0)
-    alchemy_bias = {
-        Affinity.WOOD: 10,
-        Affinity.WATER: 12,
-        Affinity.FIRE: 7,
-        Affinity.EARTH: 5,
-        Affinity.VOID: 5,
-    }.get(player.root_affinity, 0)
+    def affinity_bias(table: dict[Affinity, int]) -> int:
+        total = 0
+        for affinity in affinities:
+            value = table.get(affinity, 0)
+            if affinity == player.root_affinity:
+                total += value
+            else:
+                total += value // 2
+        return total
+
+    hp_bias = affinity_bias(
+        {
+            Affinity.WOOD: 18,
+            Affinity.EARTH: 16,
+            Affinity.WATER: 8,
+            Affinity.ICE: 6,
+        }
+    )
+    physical_attack_bias = affinity_bias(
+        {
+            Affinity.METAL: 14,
+            Affinity.FIRE: 8,
+            Affinity.THUNDER: 7,
+            Affinity.WIND: 6,
+        }
+    )
+    magical_attack_bias = affinity_bias(
+        {
+            Affinity.FIRE: 14,
+            Affinity.THUNDER: 13,
+            Affinity.ICE: 12,
+            Affinity.WATER: 7,
+            Affinity.VOID: 8,
+        }
+    )
+    physical_defense_bias = affinity_bias(
+        {
+            Affinity.EARTH: 16,
+            Affinity.METAL: 9,
+            Affinity.WOOD: 7,
+            Affinity.ICE: 4,
+        }
+    )
+    magical_defense_bias = affinity_bias(
+        {
+            Affinity.WATER: 13,
+            Affinity.ICE: 13,
+            Affinity.EARTH: 7,
+            Affinity.VOID: 8,
+        }
+    )
+    speed_bias = affinity_bias(
+        {
+            Affinity.WIND: 16,
+            Affinity.THUNDER: 8,
+            Affinity.ICE: 4,
+            Affinity.WATER: 3,
+        }
+    )
+    comprehension_bias = affinity_bias(
+        {
+            Affinity.WATER: 8,
+            Affinity.WOOD: 6,
+            Affinity.ICE: 5,
+            Affinity.VOID: 10,
+        }
+    )
+    breakthrough_bias = affinity_bias(
+        {
+            Affinity.THUNDER: 12,
+            Affinity.FIRE: 9,
+            Affinity.EARTH: 9,
+            Affinity.METAL: 5,
+        }
+    )
+    alchemy_bias = affinity_bias(
+        {
+            Affinity.WOOD: 12,
+            Affinity.WATER: 12,
+            Affinity.ICE: 5,
+            Affinity.FIRE: 5,
+            Affinity.EARTH: 4,
+        }
+    )
+
+    body_route = 0
+    sword_route = 0
+    spell_route = 0
+    if method_type == MethodType.BODY:
+        body_route += 12 + method_mastery // 20
+    elif method_type == MethodType.BATTLE:
+        sword_route += 10 + method_mastery // 22
+    elif method_type in {MethodType.MIND, MethodType.BREATH, MethodType.REBIRTH}:
+        spell_route += 8 + method_mastery // 24
+    if method_style == MethodStyle.SURGING:
+        sword_route += 4
+        spell_route += 3
+    elif method_style == MethodStyle.INSIGHT:
+        spell_route += 4
+    elif method_style == MethodStyle.UNFETTERED:
+        speed_bias += 3
+    elif method_style == MethodStyle.REBIRTH and player.rebirth_count > 0:
+        spell_route += 3 + player.rebirth_count
 
     return {
-        "攻伐": max(
+        "气血": max(
             1,
-            base
-            + attack_bias
-            + _root_affinity_duel_bonus(player) * 2
-            + _method_duel_score(method)
-            + _destiny_duel_bonus(player)
-            + _artifact_value(player, "duel")
-            + _artifact_value(player, "attack") * 2
-            + player.rebirth_count * 4,
+            90
+            + base * 2
+            + hp_bias
+            + body_route * 2
+            + root_breakthrough
+            + player.stamina // 2
+            + (16 if player.root_trait == RootTrait.EVERGREEN else 0)
+            + player.rebirth_count * 6,
         ),
-        "护身": max(
+        "物攻": max(
             1,
             base
-            + guard_bias
+            + physical_attack_bias
+            + sword_route
+            + _method_duel_score(method)
+            + _artifact_value(player, "attack") * 2
+            + _artifact_value(player, "duel")
+            + _destiny_duel_bonus(player)
+            + player.rebirth_count * 3,
+        ),
+        "法攻": max(
+            1,
+            base
+            + magical_attack_bias
+            + spell_route
+            + method_practice // 2
+            + method_insight // 2
+            + _root_affinity_duel_bonus(player)
+            + _artifact_value(player, "practice")
+            + _artifact_value(player, "duel")
+            + max(0, player.cultivation // 220),
+        ),
+        "物防": max(
+            1,
+            base
+            + physical_defense_bias
+            + body_route
             + root_breakthrough
             + _artifact_value(player, "guard") * 2
-            + min(12, player.stamina // 8)
-            + (6 if player.destiny_type == DestinyType.RESILIENT else 0)
-            + (4 if player.root_trait == RootTrait.EVERGREEN else 0),
+            + min(14, player.stamina // 7)
+            + (8 if player.destiny_type == DestinyType.RESILIENT else 0),
         ),
-        "身法": max(
+        "法防": max(
+            1,
+            base
+            + magical_defense_bias
+            + spell_route
+            + root_insight // 3
+            + method_insight // 2
+            + int(_artifact_float(player, "insight") * 80)
+            + (5 if player.root_temperament == RootTemperament.TRANQUIL else 0),
+        ),
+        "速度": max(
             1,
             18
             + speed_bias
@@ -1649,21 +2028,20 @@ def _derived_attributes(
             + _artifact_value(player, "speed") * 2
             + (5 if player.root_trait == RootTrait.WANDERING else 0),
         ),
-        "灵力": max(
+        "悟性": max(
             1,
-            base
-            + spirit_bias
-            + player.comprehension * 2
-            + root_training
-            + method_practice
-            + _artifact_value(player, "practice")
-            + max(0, player.cultivation // 180),
+            player.comprehension
+            + comprehension_bias
+            + root_training // 4
+            + method_practice // 5
+            + method_insight // 3
+            + (4 if player.root_temperament == RootTemperament.ENLIGHTENED else 0),
         ),
-        "悟道": max(
+        "道悟": max(
             1,
             player.comprehension
             + player.insight
-            + insight_bias
+            + comprehension_bias
             + root_insight
             + method_insight
             + int(_artifact_float(player, "insight") * 100)
@@ -1695,8 +2073,9 @@ def _derived_attributes(
 
 def _attribute_lines(attributes: dict[str, int]) -> list[str]:
     return [
-        f"攻伐 {attributes['攻伐']} | 护身 {attributes['护身']} | 身法 {attributes['身法']}",
-        f"灵力 {attributes['灵力']} | 悟道 {attributes['悟道']} | 破境 {attributes['破境']} | 丹道 {attributes['丹道']}",
+        f"气血 {attributes['气血']} | 物攻 {attributes['物攻']} | 法攻 {attributes['法攻']}",
+        f"物防 {attributes['物防']} | 法防 {attributes['法防']} | 速度 {attributes['速度']}",
+        f"悟性 {attributes['悟性']} | 道悟 {attributes['道悟']} | 破境 {attributes['破境']} | 丹道 {attributes['丹道']}",
     ]
 
 
@@ -1727,11 +2106,17 @@ def _map_reward_amount(area: dict[str, Any], key: str, multiplier: float = 1.0) 
 
 def _map_root_bonus(player: Player, area: dict[str, Any]) -> int:
     bonus = max(0, _root_adventure_total(player) // 2)
-    if player.root_affinity in tuple(area["favored_affinities"]):
+    player_affinities = _root_profile_affinities(player)
+    favored_affinities = tuple(area["favored_affinities"])
+    if player.root_affinity in favored_affinities:
         bonus += 8 + max(0, (player.root_purity - 60) // 8)
+    elif any(affinity in favored_affinities for affinity in player_affinities):
+        bonus += 4 + max(0, (player.root_purity - 70) // 10)
     if player.root_affinity == Affinity.VOID and int(area["required_rebirth_count"]) > 0:
         bonus += 3
     if player.root_affinity == Affinity.THUNDER and str(area["key"]) == "leize":
+        bonus += 4
+    if player.root_affinity == Affinity.ICE and str(area["key"]) == "canglang":
         bonus += 4
     return bonus
 
@@ -1971,12 +2356,14 @@ def _duel_signature(player: Player, method: dict[str, object] | None) -> tuple[s
         return "雷势", "一击定音"
     if affinity == Affinity.WATER:
         return "水势", "缠斗消磨"
+    if affinity == Affinity.ICE:
+        return "冰势", "封脉控场"
     if affinity == Affinity.FIRE:
         return "火势", "强攻压制"
     if affinity == Affinity.EARTH:
         return "山势", "稳守反击"
     if affinity == Affinity.WIND:
-        return "风势", "身法先行"
+        return "风势", "速度先行"
     if affinity == Affinity.METAL:
         return "锋势", "断脉破防"
     if affinity == Affinity.WOOD:
@@ -2077,6 +2464,20 @@ def _duel_move_table(player: Player, method: dict[str, object] | None) -> list[d
         moves[1]["guard"] = 3
         moves[2]["name"] = "灵泉护脉"
         moves[2]["heal"] = 6
+        moves[2]["effect"] = "regen"
+        moves[2]["effect_power"] = 2 + resonance
+    elif affinity == Affinity.ICE:
+        moves[0]["name"] = "霜息护身"
+        moves[0]["guard"] = 4
+        moves[0]["effect"] = "shield"
+        moves[0]["effect_power"] = 4 + resonance
+        moves[1]["name"] = "寒魄封脉"
+        moves[1]["power"] = 8
+        moves[1]["crit"] = 5
+        moves[1]["effect"] = "slow"
+        moves[1]["effect_power"] = 4 + resonance
+        moves[2]["name"] = "冰泉回照"
+        moves[2]["heal"] = 4
         moves[2]["effect"] = "regen"
         moves[2]["effect_power"] = 2 + resonance
     elif affinity == Affinity.EARTH:
@@ -2308,6 +2709,26 @@ def _duel_apply_effect(
     return None, 0
 
 
+def _duel_attack_stat(attributes: dict[str, int], method: dict[str, object] | None) -> int:
+    physical = attributes["物攻"]
+    magical = attributes["法攻"]
+    if method is None:
+        return max(physical, magical)
+    method_type = MethodType(str(method["method_type"]))
+    affinity = Affinity(str(method["affinity"]))
+    if method_type == MethodType.BODY:
+        return int(physical * 0.72 + magical * 0.28)
+    if method_type == MethodType.BATTLE:
+        if affinity in {Affinity.FIRE, Affinity.THUNDER, Affinity.ICE, Affinity.VOID}:
+            return int(physical * 0.55 + magical * 0.45)
+        return int(physical * 0.68 + magical * 0.32)
+    return int(physical * 0.30 + magical * 0.70)
+
+
+def _duel_defense_stat(attributes: dict[str, int]) -> int:
+    return int(attributes["物防"] * 0.52 + attributes["法防"] * 0.48)
+
+
 def _duel_rounds(
     attacker: Player,
     attacker_method: dict[str, object] | None,
@@ -2316,12 +2737,18 @@ def _duel_rounds(
 ) -> tuple[list[str], int, int]:
     attacker_signature, attacker_style_hint = _duel_signature(attacker, attacker_method)
     defender_signature, defender_style_hint = _duel_signature(defender, defender_method)
+    attacker_attributes = _derived_attributes(attacker, attacker_method)
+    defender_attributes = _derived_attributes(defender, defender_method)
+    attacker_attack_stat = _duel_attack_stat(attacker_attributes, attacker_method)
+    defender_attack_stat = _duel_attack_stat(defender_attributes, defender_method)
+    attacker_defense_stat = _duel_defense_stat(attacker_attributes)
+    defender_defense_stat = _duel_defense_stat(defender_attributes)
     attacker_moves = _duel_move_table(attacker, attacker_method)
     defender_moves = _duel_move_table(defender, defender_method)
     attacker_state = _duel_initial_state(attacker, attacker_method)
     defender_state = _duel_initial_state(defender, defender_method)
-    attacker_hp = 100 + max(0, attacker.cultivation // 120)
-    defender_hp = 100 + max(0, defender.cultivation // 120)
+    attacker_hp = attacker_attributes["气血"] + max(0, attacker.cultivation // 180)
+    defender_hp = defender_attributes["气血"] + max(0, defender.cultivation // 180)
     logs: list[str] = []
     attacker_swing = 0
     defender_swing = 0
@@ -2344,14 +2771,27 @@ def _duel_rounds(
         defender_move = random.choice(defender_moves)
         attacker_roll = random.randint(1, 100) + _duel_style_bonus(attacker_method) // 4
         defender_roll = random.randint(1, 100) + _duel_style_bonus(defender_method) // 4
-        attacker_roll += int(attacker_move["speed"]) + attacker_state["focus"] + attacker_state["haste"] + attacker_state["echo"] // 2
-        defender_roll += int(defender_move["speed"]) + defender_state["focus"] + defender_state["haste"] + defender_state["echo"] // 2
+        attacker_roll += (
+            int(attacker_move["speed"])
+            + attacker_attributes["速度"] // 10
+            + attacker_state["focus"]
+            + attacker_state["haste"]
+            + attacker_state["echo"] // 2
+        )
+        defender_roll += (
+            int(defender_move["speed"])
+            + defender_attributes["速度"] // 10
+            + defender_state["focus"]
+            + defender_state["haste"]
+            + defender_state["echo"] // 2
+        )
         attacker_roll -= attacker_state["stagger"] + attacker_state["slow"]
         defender_roll -= defender_state["stagger"] + defender_state["slow"]
 
         attacker_attack = (
             attacker_roll
             + int(attacker_move["power"])
+            + attacker_attack_stat // 12
             + _root_affinity_duel_bonus(attacker)
             + attacker.rebirth_count * 2
             + min(8, attacker.breakthrough_ready // 10)
@@ -2360,6 +2800,7 @@ def _duel_rounds(
         defender_attack = (
             defender_roll
             + int(defender_move["power"])
+            + defender_attack_stat // 12
             + _root_affinity_duel_bonus(defender)
             + defender.rebirth_count * 2
             + min(8, defender.breakthrough_ready // 10)
@@ -2368,6 +2809,7 @@ def _duel_rounds(
         defender_defense = (
             defender_roll
             + int(defender_move["guard"])
+            + defender_defense_stat // 14
             + _root_affinity_duel_bonus(defender)
             + defender.rebirth_count * 2
             + min(8, defender.breakthrough_ready // 10)
@@ -2377,6 +2819,7 @@ def _duel_rounds(
         attacker_defense = (
             attacker_roll
             + int(attacker_move["guard"])
+            + attacker_defense_stat // 14
             + _root_affinity_duel_bonus(attacker)
             + attacker.rebirth_count * 2
             + min(8, attacker.breakthrough_ready // 10)
@@ -2454,8 +2897,12 @@ def _duel_rounds(
 
 
 def _duel_total(player: Player, method: dict[str, object] | None, roll_value: int) -> int:
+    attributes = _derived_attributes(player, method)
     total = roll_value
     total += _realm_power(player)
+    total += _duel_attack_stat(attributes, method) // 10
+    total += _duel_defense_stat(attributes) // 18
+    total += attributes["速度"] // 12
     total += _root_breakthrough_total(player)
     total += _root_adventure_total(player) // 2
     total += _destiny_duel_bonus(player)
@@ -2726,7 +3173,7 @@ async def _load_methods(repo: GameRepository, player: Player) -> list[dict[str, 
     return [_enrich_method(player, method) for method in raw_methods]
 
 
-async def _grant_new_sect_methods(
+async def _newly_requestable_sect_methods(
     repo: GameRepository,
     player: Player,
     target_realm: Realm,
@@ -2734,19 +3181,22 @@ async def _grant_new_sect_methods(
     if player.sect_id is None:
         return []
     owned = set(player.method_ids)
-    granted: list[str] = []
-    sect_methods = await repo.get_sect_methods(player.sect_id, player.rebirth_count)
+    requestable: list[str] = []
+    sect_methods = sorted(
+        await repo.get_sect_methods(player.sect_id, 999),
+        key=_method_sort_key,
+    )
     for method in sect_methods:
         method_id = str(method["id"])
         required_realm = Realm(str(method["realm_requirement"]))
         if method_id in owned:
             continue
+        if player.rebirth_count < int(method["required_rebirth_count"]):
+            continue
         if realm_index(required_realm) > realm_index(target_realm):
             continue
-        if await repo.grant_player_method(player.user_id, method_id):
-            granted.append(str(method["name"]))
-            owned.add(method_id)
-    return granted
+        requestable.append(str(method["name"]))
+    return requestable
 
 
 def _parse_meditation_mode(mode: str | MeditationMode | None) -> MeditationMode:
@@ -2812,6 +3262,7 @@ async def create_player_if_missing(
         root_purity=profile["root_purity"],  # type: ignore[arg-type]
         root_temperament=profile["root_temperament"],  # type: ignore[arg-type]
         root_trait=root_trait,  # type: ignore[arg-type]
+        root_profile=profile["root_profile"],  # type: ignore[arg-type]
         lifespan=_lifespan_for_profile(root_type, root_trait),  # type: ignore[arg-type]
         spirit_stones=300,
         fortune=fortune,
@@ -2922,6 +3373,90 @@ async def get_player_methods(user_id: str) -> list[dict[str, object]]:
     return await _load_methods(repo, player)
 
 
+async def list_sect_method_options(user_id: str) -> list[MethodRequestOption]:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+    if player.sect_id is None:
+        raise GameError("sect_not_joined")
+
+    sect_methods = sorted(
+        await repo.get_sect_methods(player.sect_id, 999),
+        key=_method_sort_key,
+    )
+    owned_method_ids = set(player.method_ids)
+    return [
+        _method_request_option(player, method, owned_method_ids)
+        for method in sect_methods
+    ]
+
+
+async def request_sect_method(user_id: str, method_name: str) -> MethodRequestResult:
+    repo = get_repository()
+    player = await repo.get_player(user_id)
+    if player is None:
+        raise GameError("player_not_found")
+    if player.sect_id is None:
+        raise GameError("sect_not_joined")
+
+    normalized = method_name.strip()
+    if not normalized:
+        raise GameError("method_name_required")
+
+    sect_methods = sorted(
+        await repo.get_sect_methods(player.sect_id, 999),
+        key=_method_sort_key,
+    )
+    method = next(
+        (
+            item
+            for item in sect_methods
+            if normalized == str(item["name"]) or normalized == str(item["id"])
+        ),
+        None,
+    )
+    if method is None:
+        raise GameError("sect_method_not_found")
+
+    option = _method_request_option(player, method, set(player.method_ids))
+    if option.owned:
+        raise GameError("method_already_owned")
+    if player.rebirth_count < option.required_rebirth_count:
+        raise GameError(f"method_rebirth_locked:{option.required_rebirth_count}")
+    if realm_index(player.realm) < realm_index(Realm(option.realm_requirement)):
+        raise GameError(f"method_realm_locked:{option.realm_requirement}")
+    if player.spirit_stones < option.spirit_stones_cost:
+        raise GameError(f"not_enough_spirit_stones:{option.spirit_stones_cost}")
+    if player.insight < option.insight_cost:
+        raise GameError(f"not_enough_insight:{option.insight_cost}")
+
+    set_as_primary = player.primary_method_id is None
+    status = await repo.acquire_player_method_for_cost(
+        user_id,
+        option.method_id,
+        spirit_stones_cost=option.spirit_stones_cost,
+        insight_cost=option.insight_cost,
+    )
+    if status != "ok":
+        raise GameError(status)
+
+    updated = await repo.get_player(user_id)
+    assert updated is not None
+    return MethodRequestResult(
+        method_name=option.method_name,
+        grade=option.grade,
+        method_type=option.method_type,
+        affinity=option.affinity,
+        style=option.style,
+        spirit_stones_cost=option.spirit_stones_cost,
+        insight_cost=option.insight_cost,
+        remaining_spirit_stones=updated.spirit_stones,
+        remaining_insight=updated.insight,
+        set_as_primary=set_as_primary,
+    )
+
+
 async def get_recent_actions(user_id: str, limit: int = 5) -> RecentActionResult:
     repo = get_repository()
     player = await repo.get_player(user_id)
@@ -3014,9 +3549,9 @@ async def get_player_panel(user_id: str) -> PlayerPanelResult:
         f"【道友面板】{player.nickname}",
         f"境界: {player.realm.value} | 此生上限: {_effective_max_realm(player).value}",
         f"修为: {cultivation_line}",
-        f"寿元: {player.age}/{player.lifespan} | 体力: {player.stamina}/100 | 灵石: {player.spirit_stones}",
+        f"寿元: {player.age}/{player.lifespan} | 体力: {player.stamina}/100{_stamina_recovery_hint(player)} | 灵石: {player.spirit_stones}",
         "",
-        f"【灵根】{player.root_affinity.value}灵根 · {player.root_type.value} | 纯度 {player.root_purity}",
+        f"【灵根】{_root_profile_label(player)} · {player.root_type.value} | 纯度 {player.root_purity}",
         f"定位: {AFFINITY_ROLE_TEXT[player.root_affinity]}",
         f"加成: {_root_effect_summary(player, primary_method)}",
         f"词条: {player.root_temperament.value}/{player.root_trait.value} | {_root_growth_brief(player)}",
@@ -3048,15 +3583,18 @@ async def get_attribute_panel(user_id: str) -> PlayerPanelResult:
         *_attribute_lines(attributes),
         "",
         "属性用途:",
-        "- 攻伐: 影响斗法与危险地图压制力。",
-        "- 护身: 影响高风险地图受挫损耗，斗法也会通过法宝/根骨体现。",
-        "- 身法: 影响奇遇型地图、抢机缘和地图风险规避。",
-        "- 灵力: 影响修炼收益、常规地图探索与丹药吸收。",
+        "- 气血: 影响斗法承伤与高风险地图容错。",
+        "- 物攻: 影响剑修、体修和法宝类斗法压制。",
+        "- 法攻: 影响法修、雷火冰系招式和术法爆发。",
+        "- 物防: 影响体修承伤和历练受挫损耗。",
+        "- 法防: 影响术法抗性、冰水系续航和斗法稳定性。",
+        "- 速度: 影响先手、奇遇、抢机缘和地图风险规避。",
+        "- 悟性: 影响修炼、参悟和部分地图收益。",
         "- 悟道: 影响参悟、古藏、炼丹稳定性与突破加成。",
         "- 破境: 影响冲关成功率，也提高部分险地收益。",
         "- 丹道: 影响炼丹方向与药材地图收益。",
         f"当前主修: {method_name}",
-        f"灵根定位: {player.root_affinity.value}灵根 | {AFFINITY_ROLE_TEXT[player.root_affinity]}",
+        f"灵根定位: {_root_profile_label(player)} | {AFFINITY_ROLE_TEXT[player.root_affinity]}",
     ]
     return PlayerPanelResult(lines=lines)
 
@@ -3118,8 +3656,8 @@ async def explore_map_area(user_id: str, area_name: str) -> MapExploreResult:
     )
 
     reward_multiplier = _lifespan_reward_multiplier(player)
-    reward_multiplier += min(0.25, attributes["灵力"] / 600)
-    if player.root_affinity in tuple(area["favored_affinities"]):
+    reward_multiplier += min(0.25, max(attributes["悟性"], attributes["法攻"]) / 650)
+    if any(affinity in tuple(area["favored_affinities"]) for affinity in _root_profile_affinities(player)):
         reward_multiplier += 0.08
     if primary_method is not None:
         reward_multiplier += min(0.16, int(primary_method.get("adventure_bonus", 0)) / 100)
@@ -3306,10 +3844,21 @@ async def join_sect(user_id: str, sect_name: str) -> JoinSectResult:
         raise GameError("sect_locked")
 
     await repo.set_player_sect(user_id, str(sect["id"]))
-    methods = await repo.get_sect_methods(str(sect["id"]), player.rebirth_count)
+    methods = sorted(
+        await repo.get_sect_methods(str(sect["id"]), player.rebirth_count),
+        key=_method_sort_key,
+    )
     granted_method_name: str | None = None
     if methods:
-        starter = methods[0]
+        starter = next(
+            (
+                method
+                for method in methods
+                if MethodGrade(str(method["grade"])) == MethodGrade.COMMON
+                and Realm(str(method["realm_requirement"])) == Realm.QI_1
+            ),
+            methods[0],
+        )
         if await repo.grant_player_method(user_id, str(starter["id"])):
             granted_method_name = str(starter["name"])
         await repo.set_primary_method(user_id, str(starter["id"]))
@@ -3954,7 +4503,7 @@ async def breakthrough(user_id: str) -> BreakthroughResult:
             breakthrough_ready_delta=-preparation_cost,
             insight_delta=-insight_cost,
         )
-        unlocked_methods = await _grant_new_sect_methods(repo, player, target)
+        unlocked_methods = await _newly_requestable_sect_methods(repo, player, target)
         _, lifespan_notice = await _apply_lifespan_progress(
             repo,
             player,

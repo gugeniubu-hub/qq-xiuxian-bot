@@ -44,12 +44,14 @@ from xianbot.services import (
     get_today_world_event,
     get_today_world_state,
     join_sect,
+    list_sect_method_options,
     list_artifacts,
     list_inventory,
     list_market,
     list_maps_for_player,
     list_sects_for_player,
     rebirth,
+    request_sect_method,
     set_primary_method,
     sign_in,
     start_meditation,
@@ -74,6 +76,7 @@ sect_list_cmd = on_command("宗门列表", aliases={"宗门", "sects"})
 rebirth_cmd = on_command("转世", aliases={"轮回", "rebirth"})
 join_sect_cmd = on_command("加入宗门", aliases={"拜入宗门", "join_sect"})
 methods_cmd = on_command("我的功法", aliases={"宗门传承", "功法", "methods"})
+request_method_cmd = on_command("请法", aliases={"求法", "领取功法", "传功", "request_method"})
 primary_method_cmd = on_command("主修功法", aliases={"切换主修", "主修", "set_method"})
 inventory_cmd = on_command("背包", aliases={"包裹", "物品", "bag", "inv"})
 artifacts_cmd = on_command("我的法宝", aliases={"法宝", "artifacts"})
@@ -473,7 +476,69 @@ async def handle_methods(event: Event) -> None:
         lines.append(
             f"  熟练 {method['mastery']} [{method['mastery_title']}] | 风格 {method['style']}"
         )
+    lines.append("想获取更高传承，可发送“请法”查看，或“请法 功法名”。")
     await methods_cmd.finish("\n".join(lines))
+
+
+@request_method_cmd.handle()
+async def handle_request_method(event: Event, args: Message = CommandArg()) -> None:
+    method_name = args.extract_plain_text().strip()
+    if not method_name:
+        try:
+            options = await list_sect_method_options(event.get_user_id())
+        except GameError as exc:
+            reason = str(exc)
+            if reason == "player_not_found":
+                await request_method_cmd.finish("你还未入道，发送“入道 青玄”开始。")
+            if reason == "sect_not_joined":
+                await request_method_cmd.finish("你还没有宗门，先发送“宗门列表”，再“加入宗门 宗门名”。")
+            raise
+        if not options:
+            await request_method_cmd.finish("本宗暂时没有可查看的功法传承。")
+
+        lines = ["【宗门请法】格式：请法 功法名"]
+        for option in options:
+            status = option.reason or ("可请" if option.available else "未满足")
+            lines.append(
+                f"- 《{option.method_name}》[{status}] {option.grade} {option.method_type} {option.affinity}系/{option.style}"
+            )
+            lines.append(
+                f"  需 {option.realm_requirement}"
+                f"{f' / {option.required_rebirth_count}转' if option.required_rebirth_count else ''}"
+                f" | 灵石{option.spirit_stones_cost} / 道悟{option.insight_cost}"
+            )
+        await request_method_cmd.finish("\n".join(lines))
+
+    try:
+        result = await request_sect_method(event.get_user_id(), method_name)
+    except GameError as exc:
+        reason = str(exc)
+        if reason == "player_not_found":
+            await request_method_cmd.finish("你还未入道，发送“入道 青玄”开始。")
+        if reason == "sect_not_joined":
+            await request_method_cmd.finish("你还没有宗门，先发送“宗门列表”，再“加入宗门 宗门名”。")
+        if reason == "method_name_required":
+            await request_method_cmd.finish("格式：请法 功法名")
+        if reason == "sect_method_not_found":
+            await request_method_cmd.finish("本宗未找到这门功法。发送“请法”查看可请传承。")
+        if reason == "method_already_owned" or reason == "already_owned":
+            await request_method_cmd.finish("你已经习得这门功法了。发送“我的功法”查看。")
+        if reason.startswith("method_rebirth_locked:"):
+            await request_method_cmd.finish(f"此法需 {reason.split(':', 1)[1]} 转后方可请。")
+        if reason.startswith("method_realm_locked:"):
+            await request_method_cmd.finish(f"境界不足，此法需 {reason.split(':', 1)[1]}。")
+        if reason.startswith("not_enough_spirit_stones:"):
+            await request_method_cmd.finish(f"灵石不足，此法需灵石 {reason.split(':', 1)[1]}。")
+        if reason.startswith("not_enough_insight:"):
+            await request_method_cmd.finish(f"道悟不足，此法需道悟 {reason.split(':', 1)[1]}。")
+        raise
+
+    primary_note = " 已自动设为主修。" if result.set_as_primary else ""
+    await request_method_cmd.finish(
+        f"请法成功，习得《{result.method_name}》[{result.grade}/{result.method_type}/{result.affinity}系]。"
+        f"消耗灵石 {result.spirit_stones_cost}、道悟 {result.insight_cost}。"
+        f"剩余灵石 {result.remaining_spirit_stones}、道悟 {result.remaining_insight}。{primary_note}"
+    )
 
 
 @primary_method_cmd.handle()
@@ -699,7 +764,7 @@ async def handle_breakthrough(event: Event) -> None:
     else:
         lines.append(f"突破失败，修为变动 {result.cultivation_delta}。")
     if result.unlocked_methods:
-        lines.append(f"宗门传承感应而至：{'、'.join(result.unlocked_methods)}。")
+        lines.append(f"可向宗门请法：{'、'.join(result.unlocked_methods)}。发送“请法 功法名”获取。")
     if result.lifespan_notice:
         lines.append(result.lifespan_notice)
     if result.event_notice:
@@ -861,11 +926,11 @@ async def handle_insight(event: Event, args: Message = CommandArg()) -> None:
         if reason == "method_not_found":
             await insight_cmd.finish("未找到可参悟的功法，请先加入宗门或确认功法名。")
         if reason == "not_enough_fragments":
-            await insight_cmd.finish("缺少吐纳残篇，先去历练或奇遇搜集。")
+            await insight_cmd.finish("缺少悟道札记，先去历练、探索或奇遇搜集。")
         raise
 
     lines = [
-        f"[{result.world_title}] 你借残篇参悟《{result.method_name}》，熟练 +{result.mastery_gain}，"
+        f"[{result.world_title}] 你借悟道札记参悟《{result.method_name}》，熟练 +{result.mastery_gain}，"
         f"当前熟练 {result.new_mastery}，修为 +{result.cultivation_gain}。"
     ]
     if result.insight_gain:

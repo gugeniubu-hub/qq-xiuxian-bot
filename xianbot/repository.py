@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 from typing import Any
 
@@ -58,6 +59,7 @@ class GameRepository:
             player.root_purity,
             player.root_temperament.value,
             player.root_trait.value,
+            player.root_profile,
             player.realm.value,
             player.cultivation,
             player.age,
@@ -66,6 +68,7 @@ class GameRepository:
             player.spirit_stones,
             player.fortune,
             player.stamina,
+            player.stamina_recovered_at,
             player.comprehension,
             player.insight,
             player.breakthrough_ready,
@@ -138,6 +141,63 @@ class GameRepository:
         )
         return {str(row["item_id"]): int(row["quantity"]) for row in rows}
 
+    def _parse_timestamp(self, value: str | None) -> datetime | None:
+        if not value:
+            return None
+        normalized = value.replace(" ", "T")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    async def _recover_stamina_if_needed(
+        self,
+        db: aiosqlite.Connection,
+        user_id: str,
+        stamina: int,
+        recovered_at: str | None,
+    ) -> tuple[int, str | None]:
+        settings = get_settings()
+        interval = max(1, int(settings.stamina_recover_interval_seconds))
+        amount = max(0, int(settings.stamina_recover_amount))
+        now = datetime.now(timezone.utc)
+        last = self._parse_timestamp(recovered_at)
+        if last is None or last > now:
+            timestamp = now.isoformat()
+            await db.execute(
+                """
+                UPDATE players
+                SET stamina_recovered_at = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                """,
+                (timestamp, user_id),
+            )
+            await db.commit()
+            return stamina, timestamp
+        if stamina >= 100 or amount <= 0:
+            return stamina, recovered_at
+
+        ticks = int((now - last).total_seconds()) // interval
+        if ticks <= 0:
+            return stamina, recovered_at
+
+        recovered = min(100, stamina + ticks * amount)
+        timestamp_dt = now if recovered >= 100 else last + timedelta(seconds=ticks * interval)
+        timestamp = timestamp_dt.isoformat()
+        await db.execute(
+            """
+            UPDATE players
+            SET stamina = ?, stamina_recovered_at = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+            """,
+            (recovered, timestamp, user_id),
+        )
+        await db.commit()
+        return recovered, timestamp
+
     async def get_player(self, user_id: str) -> Player | None:
         async with self._connect() as db:
             row = await self._fetchone(
@@ -145,8 +205,8 @@ class GameRepository:
                 """
                 SELECT
                   user_id, nickname, root_type, root_affinity, root_purity, root_temperament,
-                  root_trait, realm, cultivation, age, age_progress, lifespan,
-                  spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
+                  root_trait, root_profile, realm, cultivation, age, age_progress, lifespan,
+                  spirit_stones, fortune, stamina, stamina_recovered_at, comprehension, insight, breakthrough_ready,
                   rebirth_count, soul_marks, legacy_points, destiny_type, destiny_level, sect_id, primary_method_id,
                   equipped_artifact_id,
                   meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
@@ -159,6 +219,12 @@ class GameRepository:
             )
             if row is None:
                 return None
+            stamina, stamina_recovered_at = await self._recover_stamina_if_needed(
+                db,
+                user_id,
+                int(row["stamina"]),
+                row["stamina_recovered_at"],
+            )
             method_ids = await self._get_player_method_ids(db, user_id)
             inventory = await self._get_player_inventory_map(db, user_id)
 
@@ -170,6 +236,7 @@ class GameRepository:
             root_purity=int(row["root_purity"]),
             root_temperament=RootTemperament(row["root_temperament"]),
             root_trait=RootTrait(row["root_trait"]),
+            root_profile=row["root_profile"],
             realm=Realm(row["realm"]),
             cultivation=int(row["cultivation"]),
             age=int(row["age"]),
@@ -177,7 +244,8 @@ class GameRepository:
             lifespan=int(row["lifespan"]),
             spirit_stones=int(row["spirit_stones"]),
             fortune=int(row["fortune"]),
-            stamina=int(row["stamina"]),
+            stamina=stamina,
+            stamina_recovered_at=stamina_recovered_at,
             comprehension=int(row["comprehension"]),
             insight=int(row["insight"]),
             breakthrough_ready=int(row["breakthrough_ready"]),
@@ -226,14 +294,14 @@ class GameRepository:
                 """
                 INSERT INTO players (
                   user_id, nickname, root_type, root_affinity, root_purity, root_temperament,
-                  root_trait, realm, cultivation, age, age_progress, lifespan,
-                  spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
+                  root_trait, root_profile, realm, cultivation, age, age_progress, lifespan,
+                  spirit_stones, fortune, stamina, stamina_recovered_at, comprehension, insight, breakthrough_ready,
                   rebirth_count, soul_marks, legacy_points, destiny_type, destiny_level, sect_id, primary_method_id,
                   equipped_artifact_id,
                   meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
                   meditation_method_id, meditation_mode, meditation_insight_reward,
                   meditation_breakthrough_reward
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 self._player_insert_params(player),
             )
@@ -252,14 +320,14 @@ class GameRepository:
                     """
                 INSERT OR IGNORE INTO players (
                   user_id, nickname, root_type, root_affinity, root_purity, root_temperament,
-                  root_trait, realm, cultivation, age, age_progress, lifespan,
-                  spirit_stones, fortune, stamina, comprehension, insight, breakthrough_ready,
+                  root_trait, root_profile, realm, cultivation, age, age_progress, lifespan,
+                  spirit_stones, fortune, stamina, stamina_recovered_at, comprehension, insight, breakthrough_ready,
                   rebirth_count, soul_marks, legacy_points, destiny_type, destiny_level, sect_id, primary_method_id,
                   equipped_artifact_id,
                   meditation_started_at, meditation_until, meditation_minutes, meditation_reward,
                   meditation_method_id, meditation_mode, meditation_insight_reward,
                   meditation_breakthrough_reward
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     self._player_insert_params(player),
                 )
@@ -302,6 +370,7 @@ class GameRepository:
         root_purity: int | None = None,
         root_temperament: RootTemperament | None = None,
         root_trait: RootTrait | None = None,
+        root_profile: str | None | object = None,
         destiny_type: DestinyType | None | object = None,
         primary_method_id: str | None | object = None,
         equipped_artifact_id: str | None | object = None,
@@ -322,6 +391,7 @@ class GameRepository:
         if stamina_delta:
             updates.append("stamina = MIN(MAX(stamina + ?, 0), 100)")
             params.append(stamina_delta)
+            updates.append("stamina_recovered_at = CURRENT_TIMESTAMP")
         if insight_delta:
             updates.append("insight = MAX(insight + ?, 0)")
             params.append(insight_delta)
@@ -361,6 +431,9 @@ class GameRepository:
         if root_trait is not None:
             updates.append("root_trait = ?")
             params.append(root_trait.value)
+        if root_profile is not None:
+            updates.append("root_profile = ?")
+            params.append(root_profile)
         if destiny_type is not None:
             updates.append("destiny_type = ?")
             params.append(destiny_type.value)
@@ -438,6 +511,7 @@ class GameRepository:
                   age = 16,
                   age_progress = 0,
                   stamina = 100,
+                  stamina_recovered_at = CURRENT_TIMESTAMP,
                   insight = 0,
                   breakthrough_ready = 0,
                   sect_id = NULL,
@@ -648,6 +722,7 @@ class GameRepository:
                       spirit_stones = spirit_stones + ?,
                       cultivation = cultivation + ?,
                       stamina = MIN(MAX(stamina + ?, 0), 100),
+                      stamina_recovered_at = CURRENT_TIMESTAMP,
                       updated_at = CURRENT_TIMESTAMP
                     WHERE user_id = ?
                     """,
@@ -806,6 +881,83 @@ class GameRepository:
             )
             await db.commit()
         return cursor.rowcount > 0
+
+    async def acquire_player_method_for_cost(
+        self,
+        user_id: str,
+        method_id: str,
+        *,
+        spirit_stones_cost: int,
+        insight_cost: int,
+    ) -> str:
+        async with self._connect() as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                player = await self._fetchone(
+                    db,
+                    """
+                    SELECT spirit_stones, insight, primary_method_id
+                    FROM players
+                    WHERE user_id = ?
+                    """,
+                    (user_id,),
+                )
+                if player is None:
+                    await db.rollback()
+                    return "player_not_found"
+
+                existing = await self._fetchone(
+                    db,
+                    """
+                    SELECT 1
+                    FROM player_methods
+                    WHERE user_id = ? AND method_id = ?
+                    """,
+                    (user_id, method_id),
+                )
+                if existing is not None:
+                    await db.rollback()
+                    return "already_owned"
+
+                if int(player["spirit_stones"]) < spirit_stones_cost:
+                    await db.rollback()
+                    return "not_enough_spirit_stones"
+                if int(player["insight"]) < insight_cost:
+                    await db.rollback()
+                    return "not_enough_insight"
+
+                equip_new_method = player["primary_method_id"] is None
+                cursor = await db.execute(
+                    """
+                    INSERT OR IGNORE INTO player_methods (user_id, method_id, mastery, equipped)
+                    VALUES (?, ?, 0, ?)
+                    """,
+                    (user_id, method_id, 1 if equip_new_method else 0),
+                )
+                if cursor.rowcount <= 0:
+                    await db.rollback()
+                    return "already_owned"
+
+                await db.execute(
+                    """
+                    UPDATE players
+                    SET
+                      spirit_stones = spirit_stones - ?,
+                      insight = insight - ?,
+                      primary_method_id = CASE
+                        WHEN primary_method_id IS NULL THEN ?
+                        ELSE primary_method_id
+                      END,
+                      updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ?
+                    """,
+                    (spirit_stones_cost, insight_cost, method_id, user_id),
+                )
+                await db.commit()
+                return "ok"
+            except Exception:
+                await db.rollback()
+                raise
 
     async def add_method_mastery(self, user_id: str, method_id: str, amount: int) -> None:
         if amount <= 0:

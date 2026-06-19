@@ -31,11 +31,13 @@ from xianbot.services import (
     get_today_world_event,
     get_today_world_state,
     join_sect,
+    list_sect_method_options,
     list_maps_for_player,
     list_artifacts,
     rebirth,
     list_inventory,
     consume_item,
+    request_sect_method,
     set_primary_method,
     sign_in,
     start_meditation,
@@ -586,7 +588,7 @@ def test_world_event_claim_rejects_repeat_claim(tmp_path, monkeypatch) -> None:
         )
 
         first = await claim_today_world_event_reward("70002")
-        assert first.reward_item_name == "吐纳残篇"
+        assert first.reward_item_name == "悟道札记"
 
         try:
             await claim_today_world_event_reward("70002")
@@ -642,6 +644,77 @@ def test_world_event_concurrency_is_atomic(tmp_path, monkeypatch) -> None:
         assert event.completed is True
         assert total_contribution >= event.target_progress
         assert all(row is not None and int(row["contribution"]) > 0 for row in contributions)
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_stamina_recovers_lazily_on_player_load(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian_stamina.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("72001", "stamina")
+        repo = GameRepository(get_settings().database_url)
+        async with repo._connect() as db:
+            await db.execute(
+                """
+                UPDATE players
+                SET stamina = 50, stamina_recovered_at = '2000-01-01T00:00:00+00:00'
+                WHERE user_id = ?
+                """,
+                ("72001",),
+            )
+            await db.commit()
+
+        recovered = await get_player_status("72001")
+        assert recovered is not None
+        assert recovered.stamina == 100
+
+    asyncio.run(scenario())
+    get_settings.cache_clear()
+
+
+def test_concurrent_method_request_charges_once(tmp_path, monkeypatch) -> None:
+    db_path = tmp_path / "qxian_request_method.db"
+    monkeypatch.setenv("QXIAN_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    get_settings.cache_clear()
+    initialize_database(get_settings().database_url)
+
+    async def scenario() -> None:
+        await create_player_if_missing("72002", "requester")
+        await join_sect("72002", "青岚宗")
+        repo = GameRepository(get_settings().database_url)
+        before = await get_player_status("72002")
+        assert before is not None
+        await repo.update_player_stats(
+            "72002",
+            realm=Realm.FOUNDATION_1,
+            spirit_stones_delta=1000,
+            insight_delta=30,
+        )
+
+        options = await list_sect_method_options("72002")
+        option = next(item for item in options if item.method_name == "青岚养心篇")
+        results = await asyncio.gather(
+            request_sect_method("72002", "青岚养心篇"),
+            request_sect_method("72002", "青岚养心篇"),
+            return_exceptions=True,
+        )
+        successes = [item for item in results if not isinstance(item, Exception)]
+        failures = [item for item in results if isinstance(item, Exception)]
+        assert len(successes) == 1
+        assert len(failures) == 1
+        assert str(failures[0]) in {"already_owned", "method_already_owned"}
+
+        after = await get_player_status("72002")
+        assert after is not None
+        assert after.spirit_stones == before.spirit_stones + 1000 - option.spirit_stones_cost
+        assert after.insight == 30 - option.insight_cost
+        methods = await get_player_methods("72002")
+        assert [method["name"] for method in methods].count("青岚养心篇") == 1
 
     asyncio.run(scenario())
     get_settings.cache_clear()
@@ -1123,6 +1196,15 @@ def test_breakthrough_unlocks_sect_method(tmp_path, monkeypatch) -> None:
         assert "青岚养心篇" in result.unlocked_methods
 
         methods = await get_player_methods("10005")
+        assert all(method["name"] != "青岚养心篇" for method in methods)
+
+        options = await list_sect_method_options("10005")
+        requestable = next(option for option in options if option.method_name == "青岚养心篇")
+        assert requestable.available is True
+        acquired = await request_sect_method("10005", "青岚养心篇")
+        assert acquired.method_name == "青岚养心篇"
+
+        methods = await get_player_methods("10005")
         assert any(method["name"] == "青岚养心篇" for method in methods)
 
     asyncio.run(scenario())
@@ -1448,7 +1530,7 @@ def test_custom_dao_name_attributes_and_map_exploration(tmp_path, monkeypatch) -
         attributes = await get_attribute_panel("94001")
         attribute_text = "\n".join(attributes.lines)
         assert "【人物属性】青玄" in attribute_text
-        assert "攻伐" in attribute_text
+        assert "物攻" in attribute_text
         assert "丹道" in attribute_text
 
         maps = await list_maps_for_player("94001")
@@ -1483,7 +1565,7 @@ def test_custom_dao_name_attributes_and_map_exploration(tmp_path, monkeypatch) -
         assert result.roll_value > 100
         assert result.cultivation_delta > 0
         assert result.stamina_delta == -12
-        assert result.attribute_used == "灵力"
+        assert result.attribute_used == "悟性"
         assert result.root_bonus > 0
 
         refreshed = await get_player_status("94001")

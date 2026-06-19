@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS players (
   root_purity INTEGER NOT NULL DEFAULT 60,
   root_temperament TEXT NOT NULL DEFAULT '中正',
   root_trait TEXT NOT NULL DEFAULT '聚灵',
+  root_profile TEXT,
   realm TEXT NOT NULL,
   cultivation INTEGER NOT NULL DEFAULT 0,
   age INTEGER NOT NULL DEFAULT 16,
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS players (
   spirit_stones INTEGER NOT NULL DEFAULT 0,
   fortune INTEGER NOT NULL DEFAULT 0,
   stamina INTEGER NOT NULL DEFAULT 100,
+  stamina_recovered_at TEXT DEFAULT CURRENT_TIMESTAMP,
   comprehension INTEGER NOT NULL DEFAULT 10,
   insight INTEGER NOT NULL DEFAULT 0,
   breakthrough_ready INTEGER NOT NULL DEFAULT 0,
@@ -313,6 +315,21 @@ DEFAULT_METHODS = (
         "以养神静心见长，可让修士在闭关时更易凝成道感。",
     ),
     (
+        "qinglan-wind-step",
+        "青岚御风诀",
+        "炼气圆满",
+        "黄阶",
+        "吐纳法",
+        "风",
+        "灵动",
+        0.12,
+        0.03,
+        0.05,
+        "qinglan",
+        0,
+        "借山岚行气，适合偏速度、探索和奇遇的修行路线。",
+    ),
+    (
         "river-mirror",
         "镜水归元录",
         "金丹前期",
@@ -326,6 +343,21 @@ DEFAULT_METHODS = (
         "qinglan",
         0,
         "青岚宗内门传承，修至深处可令气海如镜，最适合参玄与稳固根基。",
+    ),
+    (
+        "cold-spring",
+        "寒泉凝神诀",
+        "筑基后期",
+        "玄阶",
+        "心法",
+        "冰",
+        "明悟",
+        0.16,
+        0.06,
+        0.13,
+        "qinglan",
+        0,
+        "以寒泉淬念，偏法攻、法防和控场，冰、水、金灵根更容易入门。",
     ),
     (
         "scarlet-soul",
@@ -343,6 +375,21 @@ DEFAULT_METHODS = (
         "赤霄门杀伐传承，冲关与历练收益凶猛，但也更看根骨。",
     ),
     (
+        "iron-bone",
+        "玄铁炼身诀",
+        "筑基前期",
+        "黄阶",
+        "锻体法",
+        "金",
+        "绵长",
+        0.11,
+        0.08,
+        0.02,
+        "chixiao",
+        0,
+        "以玄铁煅骨，偏体修路线，能提高斗法承伤和物攻根基。",
+    ),
+    (
         "flame-body",
         "离火锻骨篇",
         "筑基中期",
@@ -356,6 +403,21 @@ DEFAULT_METHODS = (
         "chixiao",
         0,
         "以火炼躯，斗法与冲关均有奇效，但闭关时更耗心神。",
+    ),
+    (
+        "thunder-fire",
+        "雷火破阵诀",
+        "金丹前期",
+        "玄阶",
+        "战诀",
+        "雷",
+        "霸烈",
+        0.13,
+        0.13,
+        0.03,
+        "chixiao",
+        0,
+        "雷火齐发的破阵战诀，适合斗法、冲关和高风险地图压制。",
     ),
     (
         "void-scripture",
@@ -400,7 +462,7 @@ DEFAULT_METHODS = (
         0.16,
         "taixu",
         2,
-        "藏有古修封印的残篇，需要多次转世者才能真正承受其反震。",
+        "藏有古修封印的完整古篇，需要多次转世者才能真正承受其反震。",
     ),
 )
 
@@ -419,11 +481,11 @@ DEFAULT_ITEMS = (
     ("marrow-pill", "洗髓丹", "丹药", "玄阶", "转世者方能承受的洗髓丹，可洗练灵根画像。", 760, 1, 1),
     ("longevity-fruit", "延寿果", "灵果", "稀有", "服下后可滋养气血，少量延缓寿元流逝。", 380, 1, 1),
     ("rebirth-mark", "轮回印记", "秘物", "稀有", "转世重修所需的关键凭证。", 5000, 1, 1),
-    ("method-fragment", "吐纳残篇", "功法残篇", "稀有", "可用于参悟基础吐纳类功法。", 250, 0, 1),
-    ("artifact-iron-sword", "玄铁飞剑", "法宝", "凡品", "最常见的攻伐法宝，斗法时略增伤势。", 360, 0, 1),
+    ("method-fragment", "悟道札记", "修行札记", "稀有", "可用于参悟已学功法，不再作为获取新功法的碎片材料。", 250, 0, 1),
+    ("artifact-iron-sword", "玄铁飞剑", "法宝", "凡品", "最常见的物攻法宝，斗法时略增伤势。", 360, 0, 1),
     ("artifact-cloud-bell", "青云铃", "法宝", "黄阶", "铃音可稳住心神，闭关与斗法皆有助益。", 680, 0, 1),
-    ("artifact-flame-seal", "赤焰印", "法宝", "黄阶", "火性攻伐法宝，适合霸烈战诀与火灵根。", 760, 0, 1),
-    ("artifact-wind-boots", "追风履", "法宝", "玄阶", "身法类法宝，斗法时更易抢得先机。", 980, 0, 1),
+    ("artifact-flame-seal", "赤焰印", "法宝", "黄阶", "火性法攻法宝，适合霸烈战诀与火灵根。", 760, 0, 1),
+    ("artifact-wind-boots", "追风履", "法宝", "玄阶", "速度类法宝，斗法时更易抢得先机。", 980, 0, 1),
     ("artifact-thunder-banner", "引雷幡", "法宝", "玄阶", "雷性法宝，擅长迟滞敌手气机。", 1180, 0, 1),
     ("artifact-mirror-jade", "照心玉", "法宝", "玄阶", "辅助参玄悟道，也能在斗法中稳住神识。", 1280, 0, 1),
 )
@@ -538,6 +600,8 @@ def _ensure_schema_compatibility(connection: sqlite3.Connection) -> None:
         "root_purity": 60,
         "root_temperament": "中正",
         "root_trait": "聚灵",
+        "root_profile": None,
+        "stamina_recovered_at": None,
         "insight": 0,
         "breakthrough_ready": 0,
         "destiny_type": None,
@@ -562,6 +626,36 @@ def _ensure_schema_compatibility(connection: sqlite3.Connection) -> None:
                 f"ALTER TABLE players ADD COLUMN {column} INTEGER NOT NULL DEFAULT {default_value}"
             )
 
+    connection.execute(
+        """
+        UPDATE items
+        SET name = '悟道札记',
+            item_type = '修行札记',
+            description = '可用于参悟已学功法，不再作为获取新功法的碎片材料。'
+        WHERE id = 'method-fragment'
+        """
+    )
+    connection.execute(
+        """
+        UPDATE items
+        SET description = '最常见的物攻法宝，斗法时略增伤势。'
+        WHERE id = 'artifact-iron-sword'
+        """
+    )
+    connection.execute(
+        """
+        UPDATE items
+        SET description = '火性法攻法宝，适合霸烈战诀与火灵根。'
+        WHERE id = 'artifact-flame-seal'
+        """
+    )
+    connection.execute(
+        """
+        UPDATE items
+        SET description = '速度类法宝，斗法时更易抢得先机。'
+        WHERE id = 'artifact-wind-boots'
+        """
+    )
     method_columns = {
         row[1] for row in connection.execute("PRAGMA table_info(cultivation_methods)").fetchall()
     }
@@ -579,6 +673,13 @@ def _ensure_schema_compatibility(connection: sqlite3.Connection) -> None:
         connection.execute(
             f"ALTER TABLE cultivation_methods ADD COLUMN {column} {column_type} NOT NULL DEFAULT {default_sql}"
         )
+    connection.execute(
+        """
+        UPDATE cultivation_methods
+        SET description = '藏有古修封印的完整古篇，需要多次转世者才能真正承受其反震。'
+        WHERE id = 'ancient-vault'
+        """
+    )
 
     artifact_columns = {
         row[1] for row in connection.execute("PRAGMA table_info(player_artifacts)").fetchall()

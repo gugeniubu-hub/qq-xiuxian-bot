@@ -13,6 +13,7 @@ class Affinity(StrEnum):
     EARTH = "土"
     WIND = "风"
     THUNDER = "雷"
+    ICE = "冰"
     VOID = "虚"
 
 
@@ -150,6 +151,7 @@ class Player:
     root_purity: int = 60
     root_temperament: RootTemperament = RootTemperament.BALANCED
     root_trait: RootTrait = RootTrait.GATHERING
+    root_profile: Optional[str] = None
     realm: Realm = Realm.QI_1
     cultivation: int = 0
     age: int = 16
@@ -158,6 +160,7 @@ class Player:
     spirit_stones: int = 0
     fortune: int = 0
     stamina: int = 100
+    stamina_recovered_at: Optional[str] = None
     comprehension: int = 10
     insight: int = 0
     breakthrough_ready: int = 0

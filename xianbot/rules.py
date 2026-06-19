@@ -318,6 +318,10 @@ def meditation_mode_breakthrough_bonus(mode: MeditationMode) -> int:
 def affinity_synergy(root_affinity: Affinity, method_affinity: Affinity) -> float:
     if root_affinity == method_affinity:
         return 0.12
+    if method_affinity == Affinity.ICE or root_affinity == Affinity.ICE:
+        if {root_affinity, method_affinity} & {Affinity.WATER, Affinity.METAL, Affinity.ICE}:
+            return 0.06
+        return 0.02
     if method_affinity == Affinity.VOID or root_affinity == Affinity.VOID:
         return 0.05
     if method_affinity == Affinity.WIND or root_affinity == Affinity.WIND:
@@ -359,6 +363,14 @@ def affinity_specialization_bonus(root_affinity: Affinity, method_affinity: Affi
                 "breakthrough": 1,
                 "insight": 0.05,
                 "adventure": 1,
+            }
+    if root_affinity == Affinity.ICE:
+        if method_affinity in {Affinity.ICE, Affinity.WATER, Affinity.METAL}:
+            return {
+                "practice": 0.02,
+                "breakthrough": 2,
+                "insight": 0.03,
+                "adventure": 2,
             }
     if root_affinity == Affinity.WIND:
         if method_affinity in {Affinity.WIND, Affinity.WOOD, Affinity.WATER}:
@@ -421,6 +433,8 @@ def affinity_method_bias(root_affinity: Affinity, method_affinity: Affinity) -> 
         return {"practice": 0.03, "breakthrough": 4, "insight": 0.0, "adventure": 3}
     if root_affinity == Affinity.VOID and method_affinity in {Affinity.VOID, Affinity.WATER}:
         return {"practice": 0.02, "breakthrough": 1, "insight": 0.04, "adventure": 1}
+    if root_affinity == Affinity.ICE and method_affinity in {Affinity.ICE, Affinity.WATER, Affinity.METAL}:
+        return {"practice": 0.02, "breakthrough": 2, "insight": 0.03, "adventure": 2}
     if root_affinity == Affinity.WIND and method_affinity in {Affinity.WIND, Affinity.WOOD}:
         return {"practice": 0.03, "breakthrough": 2, "insight": 0.02, "adventure": 3}
     if root_affinity == Affinity.FIRE and method_affinity in {Affinity.FIRE, Affinity.EARTH}:
