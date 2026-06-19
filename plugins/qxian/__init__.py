@@ -1,4 +1,5 @@
 import asyncio
+from functools import wraps
 
 from nonebot import get_driver, logger, on_command
 from nonebot.adapters import Event, Message
@@ -6,7 +7,7 @@ from nonebot.params import CommandArg
 
 from xianbot.config import get_settings
 from xianbot.database import initialize_database
-from xianbot.repository import GameRepository
+from xianbot.repository import GameRepository, close_repository_pools
 from xianbot.game_text import (
     DESIGN_SUMMARY_TEXT,
     HELP_TEXT,
@@ -62,6 +63,7 @@ from xianbot.services import (
 driver = get_driver()
 settings = get_settings()
 maintenance_task: asyncio.Task[None] | None = None
+_user_locks: dict[str, asyncio.Lock] = {}
 
 help_cmd = on_command("帮助", aliases={"修仙帮助", "仙途帮助", "help", "menu"})
 design_cmd = on_command("设计", aliases={"玩法设计", "初版设计", "about"})
@@ -124,6 +126,7 @@ async def shutdown() -> None:
     except asyncio.CancelledError:
         pass
     maintenance_task = None
+    await close_repository_pools()
 
 
 def _start_maintenance_task() -> None:
@@ -208,6 +211,23 @@ def _cooldown_message(reason: str) -> str | None:
     return f"{action_name}刚做过一次，气机未稳，还需等 {seconds} 秒。"
 
 
+def _user_lock(user_id: str) -> asyncio.Lock:
+    lock = _user_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _user_locks[user_id] = lock
+    return lock
+
+
+def serialize_user_action(func):
+    @wraps(func)
+    async def wrapper(event: Event, *args, **kwargs):
+        async with _user_lock(event.get_user_id()):
+            return await func(event, *args, **kwargs)
+
+    return wrapper
+
+
 @help_cmd.handle()
 async def handle_help(event: Event) -> None:
     await help_cmd.finish(HELP_TEXT.format(user_id=event.get_user_id()))
@@ -241,6 +261,7 @@ async def handle_world_event(event: Event) -> None:
 
 
 @world_event_claim_cmd.handle()
+@serialize_user_action
 async def handle_world_event_claim(event: Event) -> None:
     try:
         result = await claim_today_world_event_reward(event.get_user_id())
@@ -291,6 +312,7 @@ async def handle_newbie_guide() -> None:
 
 
 @enter_path_cmd.handle()
+@serialize_user_action
 async def handle_enter_path(event: Event, args: Message = CommandArg()) -> None:
     user_id = event.get_user_id()
     dao_name = args.extract_plain_text().strip()
@@ -372,6 +394,7 @@ async def handle_destiny(event: Event) -> None:
 
 
 @sign_in_cmd.handle()
+@serialize_user_action
 async def handle_sign_in(event: Event) -> None:
     user_id = event.get_user_id()
     player = await get_player_status(user_id)
@@ -408,6 +431,7 @@ async def handle_sect_list(event: Event) -> None:
 
 
 @rebirth_cmd.handle()
+@serialize_user_action
 async def handle_rebirth_action(event: Event) -> None:
     try:
         result = await rebirth(event.get_user_id())
@@ -436,6 +460,7 @@ async def handle_rebirth_action(event: Event) -> None:
 
 
 @join_sect_cmd.handle()
+@serialize_user_action
 async def handle_join_sect(event: Event, args: Message = CommandArg()) -> None:
     sect_name = args.extract_plain_text().strip()
     if not sect_name:
@@ -500,6 +525,7 @@ async def handle_method_detail(event: Event, args: Message = CommandArg()) -> No
 
 
 @request_method_cmd.handle()
+@serialize_user_action
 async def handle_request_method(event: Event, args: Message = CommandArg()) -> None:
     method_name = args.extract_plain_text().strip()
     if not method_name:
@@ -561,6 +587,7 @@ async def handle_request_method(event: Event, args: Message = CommandArg()) -> N
 
 
 @reroll_root_cmd.handle()
+@serialize_user_action
 async def handle_reroll_root(event: Event) -> None:
     try:
         result = await reroll_root_profile(event.get_user_id())
@@ -583,6 +610,7 @@ async def handle_reroll_root(event: Event) -> None:
 
 
 @primary_method_cmd.handle()
+@serialize_user_action
 async def handle_primary_method(event: Event, args: Message = CommandArg()) -> None:
     method_name = args.extract_plain_text().strip()
     if not method_name:
@@ -637,6 +665,7 @@ async def handle_artifacts(event: Event) -> None:
 
 
 @equip_artifact_cmd.handle()
+@serialize_user_action
 async def handle_equip_artifact(event: Event, args: Message = CommandArg()) -> None:
     artifact_name = args.extract_plain_text().strip()
     if not artifact_name:
@@ -656,6 +685,7 @@ async def handle_equip_artifact(event: Event, args: Message = CommandArg()) -> N
 
 
 @adventure_cmd.handle()
+@serialize_user_action
 async def handle_adventure(event: Event) -> None:
     try:
         result = await adventure(event.get_user_id())
@@ -707,6 +737,7 @@ async def handle_maps(event: Event) -> None:
 
 
 @explore_cmd.handle()
+@serialize_user_action
 async def handle_explore(event: Event, args: Message = CommandArg()) -> None:
     area_name = args.extract_plain_text().strip()
     if not area_name:
@@ -755,6 +786,7 @@ async def handle_explore(event: Event, args: Message = CommandArg()) -> None:
 
 
 @encounter_cmd.handle()
+@serialize_user_action
 async def handle_encounter(event: Event) -> None:
     try:
         result = await encounter(event.get_user_id())
@@ -788,6 +820,7 @@ async def handle_encounter(event: Event) -> None:
 
 
 @breakthrough_cmd.handle()
+@serialize_user_action
 async def handle_breakthrough(event: Event) -> None:
     try:
         result = await breakthrough(event.get_user_id())
@@ -822,6 +855,7 @@ async def handle_breakthrough(event: Event) -> None:
 
 
 @meditate_cmd.handle()
+@serialize_user_action
 async def handle_meditation(event: Event, args: Message = CommandArg()) -> None:
     parts = args.extract_plain_text().strip().split()
     minutes = None
@@ -861,6 +895,7 @@ async def handle_meditation(event: Event, args: Message = CommandArg()) -> None:
 
 
 @leave_meditation_cmd.handle()
+@serialize_user_action
 async def handle_leave_meditation(event: Event) -> None:
     try:
         result = await end_meditation(event.get_user_id())
@@ -891,6 +926,7 @@ async def handle_leave_meditation(event: Event) -> None:
 
 
 @consume_cmd.handle()
+@serialize_user_action
 async def handle_consume(event: Event, args: Message = CommandArg()) -> None:
     item_name = args.extract_plain_text().strip()
     if not item_name:
@@ -930,6 +966,7 @@ async def handle_consume(event: Event, args: Message = CommandArg()) -> None:
 
 
 @alchemy_cmd.handle()
+@serialize_user_action
 async def handle_alchemy(event: Event, args: Message = CommandArg()) -> None:
     recipe_name = args.extract_plain_text().strip()
     if not recipe_name:
@@ -964,6 +1001,7 @@ async def handle_alchemy(event: Event, args: Message = CommandArg()) -> None:
 
 
 @insight_cmd.handle()
+@serialize_user_action
 async def handle_insight(event: Event, args: Message = CommandArg()) -> None:
     method_name = args.extract_plain_text().strip() or None
     try:
@@ -992,6 +1030,7 @@ async def handle_insight(event: Event, args: Message = CommandArg()) -> None:
 
 
 @ancient_trial_cmd.handle()
+@serialize_user_action
 async def handle_ancient_trial(event: Event) -> None:
     try:
         result = await explore_ancient_trial(event.get_user_id())
@@ -1024,6 +1063,7 @@ async def handle_ancient_trial(event: Event) -> None:
 
 
 @duel_cmd.handle()
+@serialize_user_action
 async def handle_duel(event: Event, args: Message = CommandArg()) -> None:
     target = _duel_target_text(args)
     if not target:
@@ -1076,6 +1116,7 @@ async def handle_market_list() -> None:
 
 
 @market_create_cmd.handle()
+@serialize_user_action
 async def handle_market_create(event: Event, args: Message = CommandArg()) -> None:
     parts = args.extract_plain_text().strip().split()
     if len(parts) != 3:
@@ -1110,6 +1151,7 @@ async def handle_market_create(event: Event, args: Message = CommandArg()) -> No
 
 
 @market_buy_cmd.handle()
+@serialize_user_action
 async def handle_market_buy(event: Event, args: Message = CommandArg()) -> None:
     listing_text = args.extract_plain_text().strip()
     if not listing_text.isdigit():

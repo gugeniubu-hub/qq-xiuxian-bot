@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
@@ -21,13 +22,14 @@ from xianbot.domain import (
 )
 
 
-class GameRepository:
-    def __init__(self, database_url: str):
-        self.database_url = database_url
-        self.db_path = resolve_sqlite_path(database_url)
+class SQLiteConnectionPool:
+    def __init__(self, db_path: str, size: int):
+        self.db_path = db_path
+        self.size = max(1, size)
+        self._queue: asyncio.Queue[aiosqlite.Connection] | None = None
+        self._init_lock = asyncio.Lock()
 
-    @asynccontextmanager
-    async def _connect(self) -> AsyncIterator[aiosqlite.Connection]:
+    async def _open_connection(self) -> aiosqlite.Connection:
         connection = await aiosqlite.connect(self.db_path, timeout=30)
         connection.row_factory = aiosqlite.Row
         settings = get_settings()
@@ -45,10 +47,71 @@ class GameRepository:
         await connection.execute(f"PRAGMA wal_autocheckpoint = {max(100, int(settings.sqlite_wal_autocheckpoint))}")
         await connection.execute(f"PRAGMA journal_size_limit = {journal_size_limit_bytes}")
         await connection.execute(f"PRAGMA mmap_size = {mmap_size_bytes}")
+        return connection
+
+    async def _ensure_ready(self) -> asyncio.Queue[aiosqlite.Connection]:
+        if self._queue is not None:
+            return self._queue
+        async with self._init_lock:
+            if self._queue is None:
+                queue: asyncio.Queue[aiosqlite.Connection] = asyncio.Queue(maxsize=self.size)
+                for _ in range(self.size):
+                    await queue.put(await self._open_connection())
+                self._queue = queue
+        return self._queue
+
+    @asynccontextmanager
+    async def connect(self) -> AsyncIterator[aiosqlite.Connection]:
+        queue = await self._ensure_ready()
+        connection = await queue.get()
         try:
             yield connection
         finally:
+            if connection.in_transaction:
+                await connection.rollback()
+            queue.put_nowait(connection)
+
+    async def close(self) -> None:
+        if self._queue is None:
+            return
+        while not self._queue.empty():
+            connection = self._queue.get_nowait()
+            if connection.in_transaction:
+                await connection.rollback()
             await connection.close()
+        self._queue = None
+
+
+_POOLS: dict[tuple[str, int], SQLiteConnectionPool] = {}
+
+
+def _get_pool(db_path: str) -> SQLiteConnectionPool:
+    settings = get_settings()
+    size = max(1, int(settings.sqlite_connection_pool_size))
+    key = (db_path, size)
+    pool = _POOLS.get(key)
+    if pool is None:
+        pool = SQLiteConnectionPool(db_path, size)
+        _POOLS[key] = pool
+    return pool
+
+
+async def close_repository_pools() -> None:
+    for pool in list(_POOLS.values()):
+        await pool.close()
+    _POOLS.clear()
+
+
+class GameRepository:
+    def __init__(self, database_url: str):
+        self.database_url = database_url
+        self.db_path = resolve_sqlite_path(database_url)
+        self._pool = _get_pool(self.db_path)
+
+    @asynccontextmanager
+    async def _connect(self) -> AsyncIterator[aiosqlite.Connection]:
+        async with self._pool.connect() as connection:
+            yield connection
 
     def _player_insert_params(self, player: Player) -> tuple[Any, ...]:
         return (
@@ -1948,6 +2011,142 @@ class GameRepository:
                 [(user_id, unlock_key) for unlock_key in unlock_keys],
             )
             await db.commit()
+
+    async def complete_rebirth(
+        self,
+        user_id: str,
+        *,
+        expected_rebirth_count: int,
+        previous_realm: Realm,
+        legacy_points_gained: int,
+        root_type: RootType,
+        root_affinity: Affinity,
+        root_purity: int,
+        root_temperament: RootTemperament,
+        root_trait: RootTrait,
+        root_profile: str,
+        new_lifespan: int,
+        destiny_type: DestinyType | None,
+        destiny_level: int,
+        unlock_keys: list[str],
+    ) -> Player | None:
+        async with self._connect() as db:
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                row = await self._fetchone(
+                    db,
+                    """
+                    SELECT realm, cultivation, insight, breakthrough_ready, rebirth_count,
+                           soul_marks, legacy_points, destiny_level, lifespan
+                    FROM players
+                    WHERE user_id = ?
+                    """,
+                    (user_id,),
+                )
+                if row is None:
+                    await db.rollback()
+                    return None
+                if (
+                    int(row["rebirth_count"]) != expected_rebirth_count
+                    or str(row["realm"]) != previous_realm.value
+                    or int(row["soul_marks"]) < 1
+                ):
+                    await db.rollback()
+                    return None
+
+                rebirth_count = int(row["rebirth_count"]) + 1
+                soul_marks_consumed = 1
+                await db.execute(
+                    """
+                    UPDATE players
+                    SET
+                      realm = ?,
+                      cultivation = 0,
+                      age = 16,
+                      age_progress = 0,
+                      lifespan = ?,
+                      stamina = 100,
+                      stamina_recovered_at = CURRENT_TIMESTAMP,
+                      insight = 0,
+                      breakthrough_ready = 0,
+                      rebirth_count = ?,
+                      soul_marks = MAX(soul_marks - ?, 0),
+                      legacy_points = legacy_points + ?,
+                      root_type = ?,
+                      root_affinity = ?,
+                      root_purity = ?,
+                      root_temperament = ?,
+                      root_trait = ?,
+                      root_profile = ?,
+                      destiny_type = ?,
+                      destiny_level = ?,
+                      sect_id = NULL,
+                      primary_method_id = NULL,
+                      equipped_artifact_id = NULL,
+                      meditation_started_at = NULL,
+                      meditation_until = NULL,
+                      meditation_minutes = 0,
+                      meditation_reward = 0,
+                      meditation_method_id = NULL,
+                      meditation_mode = NULL,
+                      meditation_insight_reward = 0,
+                      meditation_breakthrough_reward = 0,
+                      updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ?
+                    """,
+                    (
+                        Realm.QI_1.value,
+                        new_lifespan,
+                        rebirth_count,
+                        soul_marks_consumed,
+                        legacy_points_gained,
+                        root_type.value,
+                        root_affinity.value,
+                        root_purity,
+                        root_temperament.value,
+                        root_trait.value,
+                        root_profile,
+                        None if destiny_type is None else destiny_type.value,
+                        destiny_level,
+                        user_id,
+                    ),
+                )
+                await db.execute(
+                    """
+                    UPDATE player_methods
+                    SET equipped = 0
+                    WHERE user_id = ?
+                    """,
+                    (user_id,),
+                )
+                await db.execute(
+                    """
+                    INSERT INTO rebirth_logs (
+                      user_id, rebirth_count, previous_realm,
+                      legacy_points_gained, soul_marks_consumed
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        rebirth_count,
+                        previous_realm.value,
+                        legacy_points_gained,
+                        soul_marks_consumed,
+                    ),
+                )
+                if unlock_keys:
+                    await db.executemany(
+                        """
+                        INSERT OR IGNORE INTO legacy_unlocks (user_id, unlock_key)
+                        VALUES (?, ?)
+                        """,
+                        [(user_id, unlock_key) for unlock_key in unlock_keys],
+                    )
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
+        return await self.get_player(user_id)
 
     async def run_maintenance(
         self,

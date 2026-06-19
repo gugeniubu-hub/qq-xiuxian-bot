@@ -1,10 +1,12 @@
 import asyncio
 from collections import Counter
 
+import pytest
+
 from xianbot.config import get_settings
 from xianbot.database import initialize_database
 from xianbot.domain import Affinity, DestinyType, MeditationMode, Realm, RootTemperament, RootTrait, RootType
-from xianbot.repository import GameRepository
+from xianbot.repository import GameRepository, close_repository_pools
 from xianbot.services import (
     GameError,
     _effective_max_realm,
@@ -44,6 +46,13 @@ from xianbot.services import (
     sign_in,
     start_meditation,
 )
+
+
+@pytest.fixture(autouse=True)
+def cleanup_repository_state():
+    yield
+    asyncio.run(close_repository_pools())
+    get_settings.cache_clear()
 
 
 def test_repository_maintenance_cleans_old_records_but_keeps_recent_guardrails(tmp_path, monkeypatch) -> None:
@@ -290,6 +299,9 @@ def test_rebirth_raises_realm_cap_and_root_rarity(tmp_path, monkeypatch) -> None
         assert _effective_max_realm(player) == Realm.CORE_4
         assert player.root_purity >= 33
         assert player.root_affinity.value
+        assert player.realm == Realm.QI_1
+        assert player.cultivation == 0
+        assert player.soul_marks == 0
 
     asyncio.run(scenario())
     get_settings.cache_clear()
@@ -1009,6 +1021,21 @@ def test_rebirth_unlocks_destiny_and_persists(tmp_path, monkeypatch) -> None:
         destiny = await get_destiny_status("50001")
         assert destiny.destiny_name == result.destiny_name
         assert destiny.destiny_level == result.destiny_level
+        async with repo._connect() as db:
+            log_row = await repo._fetchone(
+                db,
+                "SELECT COUNT(*) AS cnt FROM rebirth_logs WHERE user_id = ?",
+                ("50001",),
+            )
+            unlock_row = await repo._fetchone(
+                db,
+                "SELECT COUNT(*) AS cnt FROM legacy_unlocks WHERE user_id = ?",
+                ("50001",),
+            )
+        assert log_row is not None
+        assert int(log_row["cnt"]) == 1
+        assert unlock_row is not None
+        assert int(unlock_row["cnt"]) >= 1
 
     asyncio.run(scenario())
     get_settings.cache_clear()

@@ -5560,43 +5560,24 @@ async def rebirth(user_id: str) -> RebirthResult:
         profile["root_type"],  # type: ignore[arg-type]
         profile["root_trait"],  # type: ignore[arg-type]
     )
-    update_fields: dict[str, object] = {
-        "cultivation_delta": -player.cultivation,
-        "legacy_points_delta": outcome.legacy_points_gained,
-        "rebirth_count_delta": 1,
-        "soul_marks_delta": -1,
-        "lifespan_delta": new_lifespan - player.lifespan,
-        "realm": Realm.QI_1,
-        "root_type": profile["root_type"],  # type: ignore[dict-item]
-        "root_affinity": profile["root_affinity"],  # type: ignore[dict-item]
-        "root_purity": profile["root_purity"],  # type: ignore[dict-item]
-        "root_temperament": profile["root_temperament"],  # type: ignore[dict-item]
-        "root_trait": profile["root_trait"],  # type: ignore[dict-item]
-        "insight_delta": -player.insight,
-        "breakthrough_ready_delta": -player.breakthrough_ready,
-        "destiny_level_delta": int(destiny["destiny_level"]) - player.destiny_level,
-    }
-    if destiny["destiny_type"] is not None:
-        update_fields["destiny_type"] = destiny["destiny_type"]
-    await repo.update_player_stats(
+    refreshed = await repo.complete_rebirth(
         user_id,
-        **update_fields,
-    )
-    await repo.reset_player_for_rebirth(user_id)
-
-    await repo.record_rebirth(
-        user_id=user_id,
-        rebirth_count=player.rebirth_count + 1,
+        root_type=profile["root_type"],  # type: ignore[arg-type]
+        root_affinity=profile["root_affinity"],  # type: ignore[arg-type]
+        root_purity=profile["root_purity"],  # type: ignore[arg-type]
+        root_temperament=profile["root_temperament"],  # type: ignore[arg-type]
+        root_trait=profile["root_trait"],  # type: ignore[arg-type]
+        root_profile=str(profile["root_profile"]),
+        new_lifespan=new_lifespan,
+        destiny_type=destiny["destiny_type"],  # type: ignore[arg-type]
+        destiny_level=int(destiny["destiny_level"]),
+        expected_rebirth_count=player.rebirth_count,
         previous_realm=player.realm,
         legacy_points_gained=outcome.legacy_points_gained,
-        soul_marks_consumed=1,
+        unlock_keys=[unlock.value for unlock in outcome.unlocked_features],
     )
-    await repo.save_legacy_unlocks(
-        user_id,
-        [unlock.value for unlock in outcome.unlocked_features],
-    )
-    refreshed = await repo.get_player(user_id)
-    assert refreshed is not None
+    if refreshed is None:
+        raise GameError("rebirth_locked")
     destiny_result = _destiny_result(refreshed)
     return RebirthResult(
         legacy_points_gained=outcome.legacy_points_gained,

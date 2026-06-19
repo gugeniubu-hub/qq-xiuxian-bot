@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     sqlite_synchronous: str = Field(default="NORMAL")
     sqlite_busy_timeout_ms: int = Field(default=30000)
     sqlite_cache_size_kb: int = Field(default=8192)
+    sqlite_connection_pool_size: int = Field(default=4)
     sqlite_mmap_size_mb: int = Field(default=128)
     sqlite_wal_autocheckpoint: int = Field(default=1000)
     sqlite_journal_size_limit_mb: int = Field(default=64)
