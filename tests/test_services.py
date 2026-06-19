@@ -737,6 +737,8 @@ def test_adventure_event_can_injure_and_award_wild_method(tmp_path, monkeypatch)
             cultivation_delta=1800,
             spirit_stones_delta=400,
         )
+        before = await get_player_status("72003")
+        assert before is not None
 
         import xianbot.services as services
 
@@ -785,7 +787,7 @@ def test_adventure_event_can_injure_and_award_wild_method(tmp_path, monkeypatch)
         player = await get_player_status("72003")
         assert player is not None
         assert player.stamina == 85
-        assert player.lifespan < 120
+        assert player.lifespan == before.lifespan - 1
         methods = await get_player_methods("72003")
         assert any(method["name"] == "万兽炼体经" for method in methods)
 
