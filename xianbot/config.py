@@ -57,6 +57,16 @@ class Settings(BaseSettings):
     action_cooldown_encounter_seconds: int = Field(default=0)
     action_cooldown_duel_seconds: int = Field(default=0)
     action_cooldown_trial_seconds: int = Field(default=0)
+    llm_enabled: bool = Field(default=False)
+    llm_provider: str = Field(default="deepseek")
+    llm_api_key: str = Field(default="")
+    llm_base_url: str = Field(default="https://api.deepseek.com")
+    llm_model: str = Field(default="deepseek-v4-flash")
+    llm_timeout_seconds: float = Field(default=3.0)
+    llm_max_tokens: int = Field(default=180)
+    llm_max_output_chars: int = Field(default=360)
+    llm_user_cooldown_seconds: int = Field(default=5)
+    llm_daily_limit: int = Field(default=300)
 
 
 @lru_cache

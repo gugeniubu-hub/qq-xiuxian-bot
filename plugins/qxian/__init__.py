@@ -1,12 +1,13 @@
 import asyncio
 from functools import wraps
 
-from nonebot import get_driver, logger, on_command
+from nonebot import get_driver, logger, on_command, on_message
 from nonebot.adapters import Event, Message
 from nonebot.params import CommandArg
 
 from xianbot.config import get_settings
 from xianbot.database import initialize_database
+from xianbot.llm import narrate_adventure, narrate_duel, suggest_command
 from xianbot.repository import GameRepository, close_repository_pools
 from xianbot.game_text import (
     DESIGN_SUMMARY_TEXT,
@@ -107,6 +108,30 @@ recent_cmd = on_command("最近记录", aliases={"行动记录", "最近战报",
 world_cmd = on_command("天象", aliases={"今日天象", "世界状态", "weather", "world"})
 world_event_cmd = on_command("世界事件", aliases={"今日事件", "天命事件", "event"})
 world_event_claim_cmd = on_command("领取事件", aliases={"领取天命", "事件领奖", "claim"})
+unknown_slash_cmd = on_message(priority=99, block=False)
+_KNOWN_SLASH_COMMANDS = {
+    "帮助", "修仙帮助", "仙途帮助", "设计", "玩法设计", "初版设计",
+    "宗门帮助", "宗门设计", "坊市帮助", "坊市设计", "轮回帮助", "转世帮助",
+    "轮回设计", "新手引导", "新手", "开荒指引", "入道", "创建角色", "注册",
+    "我的状态", "状态", "面板", "属性", "人物属性", "我的属性", "命格", "观命",
+    "签到", "修仙签到", "宗门列表", "宗门", "转世", "轮回", "加入宗门", "拜入宗门",
+    "我的功法", "宗门传承", "功法", "功法详情", "查看功法", "功法数据", "请法",
+    "求法", "领取功法", "传功", "主修功法", "切换主修", "主修", "重骰灵根",
+    "洗灵根", "重roll", "roll灵根", "背包", "包裹", "物品", "我的法宝", "法宝",
+    "装备法宝", "装备", "历练", "冒险", "地图", "修仙地图", "探索", "地图探索",
+    "奇遇", "机缘", "突破", "冲关", "闭关", "修炼", "出关", "结束闭关", "服用",
+    "吃药", "参悟", "悟道", "古藏试炼", "古藏", "轮回试炼", "炼丹", "炼药",
+    "斗法", "坊市", "市场", "坊市上架", "上架", "坊市购买", "购买", "排行",
+    "排行榜", "最近记录", "行动记录", "最近战报", "天象", "今日天象", "世界状态",
+    "世界事件", "今日事件", "天命事件", "领取事件", "领取天命", "事件领奖",
+    "help", "menu", "start", "begin", "me", "profile", "status", "stats", "attr",
+    "daily", "sign", "sects", "rebirth", "join_sect", "methods", "method_detail",
+    "request_method", "set_method", "reroll", "bag", "inv", "artifacts", "equip",
+    "adventure", "map", "maps", "explore", "go", "encounter", "breakthrough",
+    "meditate", "leave", "use", "alchemy", "insight", "trial", "pk", "PK", "duel",
+    "market", "sell", "buy", "rank", "world", "weather", "event", "claim",
+    "guide", "about", "sect_help", "market_help", "rebirth_help",
+}
 
 
 @driver.on_startup
@@ -209,6 +234,56 @@ def _cooldown_message(reason: str) -> str | None:
     }
     action_name = action_names.get(action_type, "该操作")
     return f"{action_name}刚做过一次，气机未稳，还需等 {seconds} 秒。"
+
+
+def _is_unknown_slash_message(event: Event) -> bool:
+    text = str(event.get_message()).strip()
+    if not text.startswith("/") or len(text) <= 1 or text.startswith("//"):
+        return False
+    command = text[1:].split(maxsplit=1)[0].split(".", maxsplit=1)[0]
+    return command not in _KNOWN_SLASH_COMMANDS
+
+
+def _adventure_summary(result) -> dict[str, object]:
+    return {
+        "world": result.world_title,
+        "roll": result.roll_value,
+        "message": result.message,
+        "event_type": result.event_type,
+        "danger": result.danger_level,
+        "injury": result.injury_notice,
+        "near_death": result.death_triggered,
+        "reward": {
+            "spirit_stones": result.spirit_stones_delta,
+            "cultivation": result.cultivation_delta,
+            "stamina": result.stamina_delta,
+            "insight": result.insight_delta,
+            "item": result.reward_item_name,
+            "method": result.reward_method_name,
+        },
+    }
+
+
+def _duel_summary(result) -> dict[str, object]:
+    return {
+        "world": result.world_title,
+        "message": result.message,
+        "attacker": result.attacker_name,
+        "defender": result.defender_name,
+        "winner": result.winner_name,
+        "attacker_roll": result.attacker_roll,
+        "defender_roll": result.defender_roll,
+        "attacker_total": result.attacker_total,
+        "defender_total": result.defender_total,
+        "original_rounds": result.rounds,
+        "fixed_rewards": {
+            "winner_spirit_stones": result.winner_spirit_stones_gain,
+            "winner_cultivation": result.winner_cultivation_gain,
+            "winner_insight": result.winner_insight_gain,
+            "loser_cultivation": result.loser_cultivation_loss,
+            "stamina_cost": abs(result.attacker_stamina_delta),
+        },
+    }
 
 
 def _user_lock(user_id: str) -> asyncio.Lock:
@@ -709,7 +784,12 @@ async def handle_adventure(event: Event) -> None:
         reward_line += f" 额外获得 {result.reward_item_name}。"
     if result.reward_method_name:
         reward_line += f" 领悟稀有功法《{result.reward_method_name}》。"
-    lines = [f"[{result.world_title}] {result.message}", f"roll={result.roll_value}", reward_line]
+    narrated_message = await narrate_adventure(
+        event.get_user_id(),
+        _adventure_summary(result),
+        result.message,
+    )
+    lines = [f"[{result.world_title}] {narrated_message}", f"roll={result.roll_value}", reward_line]
     if result.event_type:
         lines.append(f"触发{result.event_type}事件 | 危险 {result.danger_level}。")
     if result.injury_notice:
@@ -1085,11 +1165,16 @@ async def handle_duel(event: Event, args: Message = CommandArg()) -> None:
             await duel_cmd.finish("有一方体力不足，今日这场斗法暂时开不了。")
         raise
 
+    narrated_rounds = await narrate_duel(
+        event.get_user_id(),
+        _duel_summary(result),
+        result.rounds,
+    )
     await duel_cmd.finish(
         "\n".join(
             [
                 f"[{result.world_title}] {result.message}",
-                *result.rounds,
+                *narrated_rounds,
                 f"{result.attacker_name}: roll={result.attacker_roll} | 总势 {result.attacker_total}",
                 f"{result.defender_name}: roll={result.defender_roll} | 总势 {result.defender_total}",
                 f"胜者 {result.winner_name}，获灵石 +{result.winner_spirit_stones_gain}，修为 +{result.winner_cultivation_gain}，道悟 +{result.winner_insight_gain}。",
@@ -1190,3 +1275,12 @@ async def handle_ranking() -> None:
             f"{index}. {row['nickname']} | {row['realm']} | 修为 {row['cultivation']} | 灵石 {row['spirit_stones']}"
         )
     await ranking_cmd.finish("\n".join(lines))
+
+
+@unknown_slash_cmd.handle()
+async def handle_unknown_slash(event: Event) -> None:
+    if not _is_unknown_slash_message(event):
+        return
+    suggestion = await suggest_command(event.get_user_id(), str(event.get_message()).strip())
+    if suggestion:
+        await unknown_slash_cmd.finish(suggestion)

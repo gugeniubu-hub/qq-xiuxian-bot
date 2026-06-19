@@ -626,6 +626,28 @@ python bot.py
 
 见 `.env.example`。
 
+### 可选 AI 说书人
+
+可接入 DeepSeek 等 OpenAI 兼容接口做文案增强。默认关闭，模型不可用、超时、未配置 Key 或额度不足时，游戏会直接使用本地原本文案，不影响数值判定、奖励发放、PK 胜负、坊市交易和数据库写入。
+
+建议先只开启文案层:
+
+```env
+QXIAN_LLM_ENABLED=true
+QXIAN_LLM_PROVIDER=deepseek
+QXIAN_LLM_BASE_URL=https://api.deepseek.com
+QXIAN_LLM_MODEL=deepseek-v4-flash
+QXIAN_LLM_API_KEY=你的 API Key
+QXIAN_LLM_TIMEOUT_SECONDS=3
+QXIAN_LLM_DAILY_LIMIT=300
+```
+
+当前 AI 只用于:
+
+- 历练描述润色
+- 斗法回合战报润色
+- 未识别 `/xx` 指令的智能提示
+
 ## 仓库结构
 
 ```text
