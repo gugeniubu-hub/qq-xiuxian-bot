@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     action_cooldown_encounter_seconds: int = Field(default=0)
     action_cooldown_duel_seconds: int = Field(default=0)
     action_cooldown_trial_seconds: int = Field(default=0)
+    qq_buttons_enabled: bool = Field(default=True)
     llm_enabled: bool = Field(default=False)
     llm_provider: str = Field(default="deepseek")
     llm_api_key: str = Field(default="")

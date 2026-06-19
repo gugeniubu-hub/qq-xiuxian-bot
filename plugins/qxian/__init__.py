@@ -1,8 +1,23 @@
 import asyncio
 from functools import wraps
+from typing import Any
 
-from nonebot import get_driver, logger, on_command, on_message
+from nonebot import get_driver, logger, on_command, on_message, on_type
 from nonebot.adapters import Event, Message
+from nonebot.adapters.qq import Bot as QQBot
+from nonebot.adapters.qq import Message as QQMessage
+from nonebot.adapters.qq import MessageSegment as QQMessageSegment
+from nonebot.adapters.qq.event import InteractionCreateEvent as QQInteractionCreateEvent
+from nonebot.adapters.qq.models import (
+    Action,
+    Button,
+    InlineKeyboard,
+    InlineKeyboardRow,
+    MessageKeyboard,
+    Permission,
+    RenderData,
+)
+from nonebot.exception import FinishedException
 from nonebot.params import CommandArg
 
 from xianbot.config import get_settings
@@ -109,6 +124,7 @@ world_cmd = on_command("天象", aliases={"今日天象", "世界状态", "weath
 world_event_cmd = on_command("世界事件", aliases={"今日事件", "天命事件", "event"})
 world_event_claim_cmd = on_command("领取事件", aliases={"领取天命", "事件领奖", "claim"})
 unknown_slash_cmd = on_message(priority=99, block=False)
+button_action_cmd = on_type(QQInteractionCreateEvent, priority=5, block=False)
 _KNOWN_SLASH_COMMANDS = {
     "帮助", "修仙帮助", "仙途帮助", "设计", "玩法设计", "初版设计",
     "宗门帮助", "宗门设计", "坊市帮助", "坊市设计", "轮回帮助", "转世帮助",
@@ -303,24 +319,274 @@ def serialize_user_action(func):
     return wrapper
 
 
-@help_cmd.handle()
-async def handle_help(event: Event) -> None:
-    await help_cmd.finish(HELP_TEXT.format(user_id=event.get_user_id()))
+ButtonSpec = tuple[str, str] | tuple[str, str, int]
+ButtonRows = tuple[tuple[ButtonSpec, ...], ...]
+
+_BUTTON_PREFIX = "qxian:"
+_BUTTON_ACTION_COMMANDS: dict[str, str] = {
+    "help": "帮助",
+    "newbie": "新手引导",
+    "status": "面板",
+    "attributes": "属性",
+    "destiny": "命格",
+    "sign": "签到",
+    "adventure": "历练",
+    "encounter": "奇遇",
+    "breakthrough": "突破",
+    "maps": "地图",
+    "inventory": "背包",
+    "artifacts": "我的法宝",
+    "sects": "宗门列表",
+    "methods": "我的功法",
+    "request_methods": "请法",
+    "method_detail": "功法详情",
+    "insight": "参悟",
+    "market": "坊市",
+    "rank": "排行",
+    "recent": "最近记录",
+    "world": "天象",
+    "world_event": "世界事件",
+    "claim_event": "领取事件",
+    "leave_meditation": "出关",
+    "trial": "古藏试炼",
+    "meditate:吐纳:30": "闭关 30 吐纳",
+    "meditate:凝练:30": "闭关 30 凝练",
+    "meditate:参玄:30": "闭关 30 参玄",
+    "meditate:冲关:30": "闭关 30 冲关",
+}
+
+MAIN_MENU_BUTTONS: ButtonRows = (
+    (("面板", "status", 1), ("签到", "sign", 1), ("历练", "adventure", 1)),
+    (("地图", "maps", 1), ("奇遇", "encounter", 1), ("闭关30", "meditate:吐纳:30", 1)),
+    (("背包", "inventory", 1), ("功法", "methods", 1), ("法宝", "artifacts", 1)),
+    (("天象", "world", 1), ("排行", "rank", 1), ("记录", "recent", 1)),
+)
+STATUS_BUTTONS: ButtonRows = (
+    (("属性", "attributes", 1), ("命格", "destiny", 1), ("功法", "methods", 1)),
+    (("地图", "maps", 1), ("背包", "inventory", 1), ("法宝", "artifacts", 1)),
+    (("历练", "adventure", 1), ("突破", "breakthrough", 1), ("出关", "leave_meditation", 1)),
+)
+ACTION_BUTTONS: ButtonRows = (
+    (("面板", "status", 1), ("再历练", "adventure", 1), ("奇遇", "encounter", 1)),
+    (("地图", "maps", 1), ("突破", "breakthrough", 1), ("背包", "inventory", 1)),
+)
+METHOD_BUTTONS: ButtonRows = (
+    (("请法", "request_methods", 1), ("详情", "method_detail", 1), ("参悟", "insight", 1)),
+    (("面板", "status", 1), ("宗门", "sects", 1), ("历练", "adventure", 1)),
+)
+RESOURCE_BUTTONS: ButtonRows = (
+    (("背包", "inventory", 1), ("炼聚气丹", "alchemy:聚气丹", 1), ("炼回灵散", "alchemy:回灵散", 1)),
+    (("面板", "status", 1), ("坊市", "market", 1), ("地图", "maps", 1)),
+)
+WORLD_BUTTONS: ButtonRows = (
+    (("世界事件", "world_event", 1), ("领取事件", "claim_event", 1), ("天象", "world", 1)),
+    (("历练", "adventure", 1), ("奇遇", "encounter", 1), ("地图", "maps", 1)),
+)
+NEW_PLAYER_BUTTONS: ButtonRows = (
+    (("新手", "newbie", 1), ("帮助", "help", 1)),
+)
 
 
-@world_cmd.handle()
-async def handle_world_state() -> None:
-    result = await get_today_world_state()
-    await world_cmd.finish(
-        f"今日天象：{result.title}\n{result.description}\n"
-        f"历练修正 {result.adventure_bonus:+} | 奇遇修正 {result.encounter_bonus:+} | "
-        f"闭关修正 {int(result.meditation_bonus * 100):+}%"
+def _button_parts(spec: ButtonSpec) -> tuple[str, str, int]:
+    if len(spec) == 2:
+        label, action = spec
+        return label, action, 1
+    label, action, style = spec
+    return label, action, style
+
+
+def _fallback_command(action: str) -> str:
+    if action.startswith("explore:"):
+        return f"探索 {action.split(':', 1)[1]}"
+    if action.startswith("consume:"):
+        return f"服用 {action.split(':', 1)[1]}"
+    if action.startswith("alchemy:"):
+        return f"炼丹 {action.split(':', 1)[1]}"
+    return _BUTTON_ACTION_COMMANDS.get(action, "帮助")
+
+
+def _qq_button(label: str, action: str, style: int) -> Button:
+    command = _fallback_command(action)
+    button_id = f"qxian_{action}".replace(":", "_").replace(" ", "_")[:64]
+    return Button(
+        id=button_id,
+        render_data=RenderData(label=label[:12], visited_label=label[:12], style=style),
+        action=Action(
+            type=1,
+            permission=Permission(type=2),
+            data=f"{_BUTTON_PREFIX}{action}",
+            unsupport_tips=f"请直接发送“{command}”",
+        ),
     )
 
 
-@world_event_cmd.handle()
-async def handle_world_event(event: Event) -> None:
-    result = await get_today_world_event(event.get_user_id())
+def _qq_button_message(text: str, rows: ButtonRows) -> QQMessage:
+    keyboard_rows: list[InlineKeyboardRow] = []
+    for row in rows[:5]:
+        buttons = [_qq_button(*_button_parts(spec)) for spec in row[:5]]
+        if buttons:
+            keyboard_rows.append(InlineKeyboardRow(buttons=buttons))
+    keyboard = MessageKeyboard(content=InlineKeyboard(rows=keyboard_rows))
+    return QQMessage(QQMessageSegment.markdown(text)) + QQMessageSegment.keyboard(keyboard)
+
+
+def _is_qq_event(event: Event) -> bool:
+    return isinstance(event, QQInteractionCreateEvent) or event.__class__.__module__.startswith(
+        "nonebot.adapters.qq"
+    )
+
+
+async def _finish_reply(matcher: Any, event: Event, text: str, buttons: ButtonRows | None = None) -> None:
+    if buttons and settings.qq_buttons_enabled and _is_qq_event(event):
+        try:
+            await matcher.finish(_qq_button_message(text, buttons))
+        except FinishedException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("qxian qq button reply fallback to text: {}", exc)
+    await matcher.finish(text)
+
+
+def _map_buttons(lines: list[str]) -> ButtonRows:
+    specs: list[ButtonSpec] = []
+    for line in lines:
+        if not line.startswith("- ") or "[可探索]" not in line:
+            continue
+        area_name = line[2:].split(" [", 1)[0].strip()
+        if area_name:
+            specs.append((f"探索{area_name[:4]}", f"explore:{area_name}", 1))
+    rows = [tuple(specs[index : index + 2]) for index in range(0, min(len(specs), 6), 2)]
+    rows.append((("面板", "status", 1), ("历练", "adventure", 1), ("奇遇", "encounter", 1)))
+    return tuple(rows)
+
+
+def _inventory_buttons(lines: list[str]) -> ButtonRows:
+    consumables = ("聚气丹", "回灵散", "凝元丹", "悟道丹", "洗髓丹")
+    specs: list[ButtonSpec] = []
+    for item_name in consumables:
+        if any(line.startswith(f"- {item_name} x") for line in lines):
+            specs.append((f"服{item_name[:3]}", f"consume:{item_name}", 1))
+    rows = [tuple(specs[index : index + 3]) for index in range(0, min(len(specs), 6), 3)]
+    rows.append((("炼丹", "alchemy:聚气丹", 1), ("坊市", "market", 1), ("面板", "status", 1)))
+    return tuple(rows)
+
+
+def _simple_game_error_text(reason: str) -> str:
+    cooldown_message = _cooldown_message(reason)
+    if cooldown_message is not None:
+        return cooldown_message
+    if reason == "player_not_found":
+        return "你还未入道，发送“入道 道号”开始。"
+    if reason == "not_enough_stamina":
+        return "体力不足，先签到、服用回灵散或稍后再来。"
+    if reason == "already_signed":
+        return "今天已经签到过了，明日再来。"
+    if reason == "not_enough_cultivation":
+        return "修为尚不足以冲关。"
+    if reason == "not_enough_preparation":
+        return "冲关底蕴不足。先闭关凝练或冲关积蓄。"
+    if reason == "realm_maxed":
+        return "当前已至此世尽头，后续以转世为主。"
+    if reason == "not_meditating":
+        return "你当前并未闭关。"
+    if reason == "already_meditating":
+        return "你已在闭关中，发送“出关”查看。"
+    if reason == "world_event_not_completed":
+        return "今日世界事件尚未完成，先和群友一起推进。"
+    if reason == "not_participated":
+        return "你今日尚未参与该世界事件，先去出一份力。"
+    if reason == "already_claimed":
+        return "你今日的事件奖励已经领过了。"
+    if reason == "ancient_trial_locked":
+        return "古藏试炼需至少二转后方可承受。"
+    if reason == "method_not_found":
+        return "未找到可参悟的功法，请先加入宗门或确认功法名。"
+    if reason == "not_enough_fragments":
+        return "缺少悟道札记，先去历练、探索或奇遇搜集。"
+    if reason == "item_not_found":
+        return "未找到该物品。"
+    if reason == "item_not_consumable":
+        return "这东西不能直接服用。"
+    if reason == "stamina_full":
+        return "你当前体力已满，回灵散先留着更划算。"
+    if reason == "breakthrough_full":
+        return "你的冲关底蕴已满，凝元丹暂时不必再服。"
+    if reason == "not_enough_items":
+        return "背包数量不足。"
+    if reason == "recipe_not_found":
+        return "未找到这张丹方。当前建议尝试：聚气丹 / 回灵散 / 凝元丹 / 悟道丹 / 洗髓丹"
+    if reason == "recipe_locked":
+        return "这张丹方需要转世后才能稳住药力。"
+    if reason == "not_enough_materials":
+        return "灵材不足，先去历练、奇遇或坊市再备料。"
+    if reason.startswith("map_locked:"):
+        return f"该地图暂未解锁，{reason.split(':', 1)[1]}。"
+    return f"本次操作未能完成：{reason}"
+
+
+def _format_sign_in_result(result) -> str:
+    extra = "今日鸿运加身。" if result.fortune_roll >= 96 else "气运平稳。"
+    return (
+        f"[{result.world_title}] 签到完成，获得灵石 {result.base_reward}，"
+        f"福缘池分红 {result.pool_reward}，修为提升后总计 {result.total_cultivation}。{extra}"
+    )
+
+
+async def _format_adventure_result(user_id: str, result) -> str:
+    reward_line = (
+        f"灵石 {result.spirit_stones_delta:+}，修为 {result.cultivation_delta:+}，体力 {result.stamina_delta}。"
+    )
+    if result.insight_delta:
+        reward_line += f" 道悟 {result.insight_delta:+}。"
+    if result.reward_item_name:
+        reward_line += f" 额外获得 {result.reward_item_name}。"
+    if result.reward_method_name:
+        reward_line += f" 领悟稀有功法《{result.reward_method_name}》。"
+    narrated_message = await narrate_adventure(user_id, _adventure_summary(result), result.message)
+    lines = [f"[{result.world_title}] {narrated_message}", f"roll={result.roll_value}", reward_line]
+    if result.event_type:
+        lines.append(f"触发{result.event_type}事件 | 危险 {result.danger_level}。")
+    if result.injury_notice:
+        lines.append(result.injury_notice)
+    if result.death_triggered:
+        lines.append("你这次几乎身死道消，虽然角色没有删除，但已经付出重伤代价。")
+    if result.mastery_method_name and result.mastery_gain:
+        lines.append(f"《{result.mastery_method_name}》熟练 +{result.mastery_gain}。")
+    if result.lifespan_notice:
+        lines.append(result.lifespan_notice)
+    if result.event_notice:
+        lines.append(result.event_notice)
+    return "\n".join(lines)
+
+
+def _format_explore_result(result) -> str:
+    reward_line = (
+        f"灵石 {result.spirit_stones_delta:+}，修为 {result.cultivation_delta:+}，体力 {result.stamina_delta}。"
+    )
+    if result.insight_delta:
+        reward_line += f" 道悟 {result.insight_delta:+}。"
+    if result.breakthrough_ready_delta:
+        reward_line += f" 冲关底蕴 {result.breakthrough_ready_delta:+}。"
+    if result.fortune_delta:
+        reward_line += f" 福缘 {result.fortune_delta:+}。"
+    if result.reward_item_name:
+        reward_line += f" 额外获得 {result.reward_item_name}。"
+    lines = [
+        f"[{result.world_title}] {result.area_name}",
+        result.message,
+        f"roll={result.roll_value} | {result.attribute_used}+{result.attribute_bonus} | 灵根相性+{result.root_bonus}",
+        reward_line,
+    ]
+    if result.mastery_method_name and result.mastery_gain:
+        lines.append(f"《{result.mastery_method_name}》熟练 +{result.mastery_gain}。")
+    if result.lifespan_notice:
+        lines.append(result.lifespan_notice)
+    if result.event_notice:
+        lines.append(result.event_notice)
+    return "\n".join(lines)
+
+
+def _format_world_event(result) -> str:
     status = "已完成" if result.completed else f"{result.current_progress}/{result.target_progress}"
     lines = [
         f"今日事件：{result.title}",
@@ -332,7 +598,320 @@ async def handle_world_event(event: Event) -> None:
         f"个人贡献：{result.player_contribution}" + (" | 已领奖" if result.claimed else ""),
         f"完成奖励：{result.reward_summary}",
     ]
-    await world_event_cmd.finish("\n".join(lines))
+    return "\n".join(lines)
+
+
+async def _run_button_action(event: Event, action: str) -> tuple[str, ButtonRows | None]:
+    user_id = event.get_user_id()
+    if action == "help":
+        return HELP_TEXT.format(user_id=user_id), MAIN_MENU_BUTTONS
+    if action == "newbie":
+        return NEWBIE_GUIDE_TEXT, MAIN_MENU_BUTTONS
+    if action == "status":
+        result = await get_player_panel(user_id)
+        return "\n".join(result.lines), STATUS_BUTTONS
+    if action == "attributes":
+        result = await get_attribute_panel(user_id)
+        return "\n".join(result.lines), STATUS_BUTTONS
+    if action == "destiny":
+        result = await get_destiny_status(user_id)
+        return "\n".join([f"命格: {result.destiny_name}", f"层数: {result.destiny_level}重", f"效果: {result.description}"]), STATUS_BUTTONS
+    if action == "sign":
+        return _format_sign_in_result(await sign_in(user_id)), ACTION_BUTTONS
+    if action == "adventure":
+        return await _format_adventure_result(user_id, await adventure(user_id)), ACTION_BUTTONS
+    if action == "encounter":
+        result = await encounter(user_id)
+        lines = [
+            f"[{result.world_title}] {result.message}",
+            f"roll={result.roll_value}",
+            f"灵石 {result.spirit_stones_delta:+}，修为 {result.cultivation_delta:+}，体力 {result.stamina_delta}，福缘 {result.fortune_delta:+}。",
+        ]
+        if result.insight_delta:
+            lines.append(f"道悟 {result.insight_delta:+}。")
+        if result.reward_item_name:
+            lines.append(f"额外获得 {result.reward_item_name}。")
+        if result.mastery_method_name and result.mastery_gain:
+            lines.append(f"《{result.mastery_method_name}》熟练 +{result.mastery_gain}。")
+        if result.lifespan_notice:
+            lines.append(result.lifespan_notice)
+        if result.event_notice:
+            lines.append(result.event_notice)
+        return "\n".join(lines), ACTION_BUTTONS
+    if action == "breakthrough":
+        result = await breakthrough(user_id)
+        lines = [f"[{result.world_title}] roll={result.roll_value} / 成功率约 {result.chance_percent}%"]
+        if result.preparation_cost:
+            lines.append(f"本次消耗冲关底蕴 {result.preparation_cost}。")
+        if result.soul_mark_gained:
+            lines.append("你在天地压迫中凝成了一枚轮回印记。")
+        elif result.success:
+            lines.append(f"突破成功！ {result.current_realm} -> {result.next_realm}")
+        else:
+            lines.append(f"突破失败，修为变动 {result.cultivation_delta}。")
+        if result.unlocked_methods:
+            lines.append(f"可向宗门请法：{'、'.join(result.unlocked_methods)}。发送“请法 功法名”获取。")
+        if result.lifespan_notice:
+            lines.append(result.lifespan_notice)
+        if result.event_notice:
+            lines.append(result.event_notice)
+        return "\n".join(lines), ACTION_BUTTONS
+    if action == "maps":
+        result = await list_maps_for_player(user_id)
+        return "\n".join(result.lines), _map_buttons(result.lines)
+    if action.startswith("explore:"):
+        area_name = action.split(":", 1)[1]
+        return _format_explore_result(await explore_map_area(user_id, area_name)), ACTION_BUTTONS
+    if action == "inventory":
+        player = await get_player_status(user_id)
+        if player is None:
+            raise GameError("player_not_found")
+        items = await list_inventory(user_id)
+        if not items:
+            return "你的背包空空如也。", RESOURCE_BUTTONS
+        lines = ["当前背包:"]
+        for item in items:
+            lines.append(f"- {item['name']} x{item['quantity']} [{item['item_type']}/{item['rarity']}]")
+        return "\n".join(lines), _inventory_buttons(lines)
+    if action == "artifacts":
+        player = await get_player_status(user_id)
+        if player is None:
+            raise GameError("player_not_found")
+        artifacts = await list_artifacts(user_id)
+        if not artifacts:
+            return "你还没有法宝。多去历练、奇遇，中后期机缘会出法宝。", ACTION_BUTTONS
+        lines = ["当前法宝:"]
+        for artifact in artifacts:
+            mark = " [已装备]" if bool(artifact.get("equipped")) else ""
+            lines.append(f"- {artifact['name']}{mark} [{artifact['rarity']}] | 熟练 {artifact['mastery']}")
+            lines.append(f"  {artifact['effect_brief']}")
+        return "\n".join(lines), ACTION_BUTTONS
+    if action == "sects":
+        sects = await list_sects_for_player(user_id)
+        if not sects:
+            return "当前没有可加入的宗门。", METHOD_BUTTONS
+        lines = ["当前可见宗门:"]
+        for sect in sects:
+            gate = ""
+            if int(sect["required_rebirth_count"]) > 0:
+                gate = f" [需{sect['required_rebirth_count']}转]"
+            lines.append(f"- {sect['name']}{gate}: {sect['description']}")
+        return "\n".join(lines), METHOD_BUTTONS
+    if action == "methods":
+        player = await get_player_status(user_id)
+        if player is None:
+            raise GameError("player_not_found")
+        methods = await get_player_methods(user_id)
+        if not methods:
+            return "你目前尚未习得功法，先加入宗门吧。", METHOD_BUTTONS
+        lines = ["你已习得的功法:"]
+        for method in methods:
+            mark = " [主修]" if bool(method.get("equipped")) else ""
+            lines.append(f"- {method['name']}{mark} | {method['grade']} {method['method_type']} {method['affinity']}系")
+            lines.append(
+                f"  境界需求 {method['realm_requirement']} | 修炼+{int(float(method['practice_total']) * 100)}%"
+                f" | 冲关+{int(method['breakthrough_total'])}% | 悟道+{int(float(method['insight_total']) * 100)}%"
+            )
+            lines.append(f"  熟练 {method['mastery']} [{method['mastery_title']}] | 风格 {method['style']}")
+        lines.append("想获取更高传承，可发送“请法”查看，或“请法 功法名”。")
+        return "\n".join(lines), METHOD_BUTTONS
+    if action == "request_methods":
+        options = await list_sect_method_options(user_id)
+        if not options:
+            return "本宗暂时没有可查看的功法传承。", METHOD_BUTTONS
+        lines = ["【宗门请法】格式：请法 功法名"]
+        for option in options:
+            status = option.reason or ("可请" if option.available else "未满足")
+            lines.append(
+                f"- 《{option.method_name}》[{status}] {option.grade} {option.method_type} {option.affinity}系/{option.style}"
+            )
+            lines.append(
+                f"  需 {option.realm_requirement}"
+                f"{f' / {option.required_rebirth_count}转' if option.required_rebirth_count else ''}"
+                f" | 灵石{option.spirit_stones_cost} / 道悟{option.insight_cost}"
+            )
+        return "\n".join(lines), METHOD_BUTTONS
+    if action == "method_detail":
+        result = await get_method_detail_panel(user_id, None)
+        return "\n".join(result.lines), METHOD_BUTTONS
+    if action == "insight":
+        result = await contemplate_method(user_id, None)
+        lines = [
+            f"[{result.world_title}] 你借悟道札记参悟《{result.method_name}》，熟练 +{result.mastery_gain}，"
+            f"当前熟练 {result.new_mastery}，修为 +{result.cultivation_gain}。"
+        ]
+        if result.insight_gain:
+            lines.append(f"道悟 +{result.insight_gain}。")
+        if result.breakthrough_ready_gain:
+            lines.append(f"冲关底蕴 +{result.breakthrough_ready_gain}。")
+        if result.event_notice:
+            lines.append(result.event_notice)
+        return "\n".join(lines), METHOD_BUTTONS
+    if action.startswith("consume:"):
+        result = await consume_item(user_id, action.split(":", 1)[1])
+        lines = [f"{result.message} 你服用了 {result.item_name}。"]
+        if result.cultivation_delta:
+            lines.append(f"修为 {result.cultivation_delta:+}")
+        if result.stamina_delta:
+            lines.append(f"体力 {result.stamina_delta:+}")
+        if result.insight_delta:
+            lines.append(f"道悟 {result.insight_delta:+}")
+        if result.breakthrough_ready_delta:
+            lines.append(f"冲关底蕴 {result.breakthrough_ready_delta:+}")
+        if result.lifespan_delta:
+            lines.append(f"寿元上限 {result.lifespan_delta:+}")
+        return "，".join(lines) + "。", RESOURCE_BUTTONS
+    if action.startswith("alchemy:"):
+        result = await craft_elixir(user_id, action.split(":", 1)[1])
+        lines = [
+            f"[{result.world_title}] {result.message}",
+            f"目标丹药《{result.item_name}》 | roll={result.roll_value} / 成丹率约 {result.chance_percent}%",
+        ]
+        if result.success:
+            lines.append(f"获得 {result.item_name} x{result.quantity}。")
+            if result.insight_gain:
+                lines.append(f"炼丹反哺心神，道悟 +{result.insight_gain}。")
+        elif result.byproduct_name:
+            lines.append(f"获得副产物 {result.byproduct_name} x{result.byproduct_quantity}。")
+        if result.event_notice:
+            lines.append(result.event_notice)
+        return "\n".join(lines), RESOURCE_BUTTONS
+    if action.startswith("meditate:"):
+        _, mode, minutes_text = action.split(":", 2)
+        result = await start_meditation(user_id, int(minutes_text), mode)
+        lines = [
+            f"[{result.world_title}] 你已开始{result.mode_name}闭关 {result.minutes} 分钟，预计至 {result.until} 出关。",
+            f"本次可获修为 {result.reward}，道悟 {result.insight_reward}，冲关底蕴 {result.breakthrough_reward}。",
+        ]
+        if result.method_name:
+            lines.append(f"主修功法：《{result.method_name}》。")
+        return "\n".join(lines), STATUS_BUTTONS
+    if action == "leave_meditation":
+        result = await end_meditation(user_id)
+        if result.still_waiting:
+            return (
+                f"{result.mode_name or '闭关'}尚未结束，还需约 {result.remaining_minutes} 分钟，可得修为 {result.reward}。",
+                STATUS_BUTTONS,
+            )
+        lines = [f"你已出关，本次{result.mode_name or '闭关'} {result.minutes} 分钟，获得修为 {result.reward}。"]
+        if result.insight_gain:
+            lines.append(f"道悟 +{result.insight_gain}。")
+        if result.breakthrough_ready_gain:
+            lines.append(f"冲关底蕴 +{result.breakthrough_ready_gain}。")
+        if result.method_name and result.mastery_gain:
+            lines.append(f"《{result.method_name}》熟练 +{result.mastery_gain}。")
+        if result.lifespan_notice:
+            lines.append(result.lifespan_notice)
+        if result.event_notice:
+            lines.append(result.event_notice)
+        return "\n".join(lines), STATUS_BUTTONS
+    if action == "trial":
+        result = await explore_ancient_trial(user_id)
+        lines = [f"{result.trial_name}: {result.message}", f"roll={result.roll_value} / 试炼把握约 {result.chance_percent}%"]
+        if result.success:
+            lines.append(
+                f"灵石 +{result.reward_spirit_stones} | 修为 +{result.reward_cultivation} | 道悟 +{result.reward_insight}"
+            )
+            if result.reward_item_name:
+                lines.append(f"额外获得 {result.reward_item_name} x1。")
+        else:
+            lines.append(f"修为 {result.reward_cultivation}。")
+        return "\n".join(lines), ACTION_BUTTONS
+    if action == "market":
+        listings = await list_market()
+        if not listings:
+            return "坊市目前空空如也。", RESOURCE_BUTTONS
+        lines = ["坊市在售:"]
+        for listing in listings:
+            lines.append(
+                f"#{listing['id']} {listing['item_name']} x{listing['quantity']} "
+                f"- {listing['unit_price']} 灵石/件 卖家:{listing['seller_name']}"
+            )
+        return "\n".join(lines), RESOURCE_BUTTONS
+    if action == "rank":
+        rankings = await get_rankings()
+        if not rankings:
+            return "当前尚无排行数据。", MAIN_MENU_BUTTONS
+        lines = ["修仙排行榜:"]
+        for index, row in enumerate(rankings, start=1):
+            lines.append(
+                f"{index}. {row['nickname']} | {row['realm']} | 修为 {row['cultivation']} | 灵石 {row['spirit_stones']}"
+            )
+        return "\n".join(lines), MAIN_MENU_BUTTONS
+    if action == "recent":
+        result = await get_recent_actions(user_id)
+        return "\n".join(result.lines), ACTION_BUTTONS
+    if action == "world":
+        result = await get_today_world_state()
+        return (
+            f"今日天象：{result.title}\n{result.description}\n"
+            f"历练修正 {result.adventure_bonus:+} | 奇遇修正 {result.encounter_bonus:+} | "
+            f"闭关修正 {int(result.meditation_bonus * 100):+}%",
+            WORLD_BUTTONS,
+        )
+    if action == "world_event":
+        return _format_world_event(await get_today_world_event(user_id)), WORLD_BUTTONS
+    if action == "claim_event":
+        result = await claim_today_world_event_reward(user_id)
+        lines = [
+            f"你已领取《{result.title}》奖励。",
+            f"个人贡献：{result.contribution}",
+            f"灵石 +{result.reward_spirit_stones} | 修为 +{result.reward_cultivation} | 道悟 +{result.reward_insight}",
+        ]
+        if result.reward_item_name and result.reward_item_quantity:
+            lines.append(f"额外获得 {result.reward_item_name} x{result.reward_item_quantity}。")
+        return "\n".join(lines), WORLD_BUTTONS
+    raise GameError("unknown_button_action")
+
+
+@button_action_cmd.handle()
+async def handle_button_action(bot: QQBot, event: QQInteractionCreateEvent) -> None:
+    payload = event.data.resolved.button_data or ""
+    if not payload.startswith(_BUTTON_PREFIX):
+        return
+
+    try:
+        await bot.put_interaction(interaction_id=event.id, code=0)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("qxian qq button ack failed: {}", exc)
+
+    action = payload[len(_BUTTON_PREFIX) :]
+    try:
+        async with _user_lock(event.get_user_id()):
+            text, buttons = await _run_button_action(event, action)
+    except GameError as exc:
+        text = _simple_game_error_text(str(exc))
+        buttons = MAIN_MENU_BUTTONS
+    except Exception:  # noqa: BLE001
+        logger.exception("qxian qq button action failed")
+        text = "按钮触发失败了，但游戏数据没有被按钮层改坏。请直接发送“帮助”继续。"
+        buttons = MAIN_MENU_BUTTONS
+
+    await _finish_reply(button_action_cmd, event, text, buttons)
+
+
+@help_cmd.handle()
+async def handle_help(event: Event) -> None:
+    await _finish_reply(help_cmd, event, HELP_TEXT.format(user_id=event.get_user_id()), MAIN_MENU_BUTTONS)
+
+
+@world_cmd.handle()
+async def handle_world_state(event: Event) -> None:
+    result = await get_today_world_state()
+    await _finish_reply(
+        world_cmd,
+        event,
+        f"今日天象：{result.title}\n{result.description}\n"
+        f"历练修正 {result.adventure_bonus:+} | 奇遇修正 {result.encounter_bonus:+} | "
+        f"闭关修正 {int(result.meditation_bonus * 100):+}%",
+        WORLD_BUTTONS,
+    )
+
+
+@world_event_cmd.handle()
+async def handle_world_event(event: Event) -> None:
+    result = await get_today_world_event(event.get_user_id())
+    await _finish_reply(world_event_cmd, event, _format_world_event(result), WORLD_BUTTONS)
 
 
 @world_event_claim_cmd.handle()
@@ -358,7 +937,7 @@ async def handle_world_event_claim(event: Event) -> None:
     ]
     if result.reward_item_name and result.reward_item_quantity:
         lines.append(f"额外获得 {result.reward_item_name} x{result.reward_item_quantity}。")
-    await world_event_claim_cmd.finish("\n".join(lines))
+    await _finish_reply(world_event_claim_cmd, event, "\n".join(lines), WORLD_BUTTONS)
 
 
 @design_cmd.handle()
@@ -382,8 +961,8 @@ async def handle_rebirth() -> None:
 
 
 @newbie_cmd.handle()
-async def handle_newbie_guide() -> None:
-    await newbie_cmd.finish(NEWBIE_GUIDE_TEXT)
+async def handle_newbie_guide(event: Event) -> None:
+    await _finish_reply(newbie_cmd, event, NEWBIE_GUIDE_TEXT, MAIN_MENU_BUTTONS)
 
 
 @enter_path_cmd.handle()
@@ -406,13 +985,19 @@ async def handle_enter_path(event: Event, args: Message = CommandArg()) -> None:
             await enter_path_cmd.finish("这个道号已被占用，换一个吧。")
         raise
     if created:
-        await enter_path_cmd.finish(
+        await _finish_reply(
+            enter_path_cmd,
+            event,
             f"{player.nickname} 入道成功。"
             f"灵根为{player.root_affinity.value}灵根·{player.root_type.value}，纯度 {player.root_purity}。"
-            f"初始灵石 {player.spirit_stones}，福缘 {player.fortune}。发送“面板”查看详情，发送“地图”选择历练地点。"
+            f"初始灵石 {player.spirit_stones}，福缘 {player.fortune}。发送“面板”查看详情，发送“地图”选择历练地点。",
+            STATUS_BUTTONS,
         )
-    await enter_path_cmd.finish(
-        f"{player.nickname} 早已踏上仙途，当前境界 {player.realm.value}，灵根 {player.root_affinity.value}灵根·{player.root_type.value}。"
+    await _finish_reply(
+        enter_path_cmd,
+        event,
+        f"{player.nickname} 早已踏上仙途，当前境界 {player.realm.value}，灵根 {player.root_affinity.value}灵根·{player.root_type.value}。",
+        STATUS_BUTTONS,
     )
 
 
@@ -424,7 +1009,7 @@ async def handle_status(event: Event) -> None:
         if str(exc) == "player_not_found":
             await status_cmd.finish("你还未入道，发送“入道”开始。")
         raise
-    await status_cmd.finish("\n".join(panel.lines))
+    await _finish_reply(status_cmd, event, "\n".join(panel.lines), STATUS_BUTTONS)
 
 
 @attribute_cmd.handle()
@@ -435,7 +1020,7 @@ async def handle_attributes(event: Event) -> None:
         if str(exc) == "player_not_found":
             await attribute_cmd.finish("你还未入道，发送“入道 青玄”开始。")
         raise
-    await attribute_cmd.finish("\n".join(panel.lines))
+    await _finish_reply(attribute_cmd, event, "\n".join(panel.lines), STATUS_BUTTONS)
 
 
 @recent_cmd.handle()
@@ -446,7 +1031,7 @@ async def handle_recent_actions(event: Event) -> None:
         if str(exc) == "player_not_found":
             await recent_cmd.finish("你还未入道，发送“入道”开始。")
         raise
-    await recent_cmd.finish("\n".join(result.lines))
+    await _finish_reply(recent_cmd, event, "\n".join(result.lines), ACTION_BUTTONS)
 
 
 @destiny_cmd.handle()
@@ -457,14 +1042,17 @@ async def handle_destiny(event: Event) -> None:
         if str(exc) == "player_not_found":
             await destiny_cmd.finish("你还未入道，发送“入道”开始。")
         raise
-    await destiny_cmd.finish(
+    await _finish_reply(
+        destiny_cmd,
+        event,
         "\n".join(
             [
                 f"命格: {result.destiny_name}",
                 f"层数: {result.destiny_level}重",
                 f"效果: {result.description}",
             ]
-        )
+        ),
+        STATUS_BUTTONS,
     )
 
 
@@ -483,11 +1071,7 @@ async def handle_sign_in(event: Event) -> None:
             await sign_in_cmd.finish("今天已经签到过了，明日再来。")
         raise
 
-    extra = "今日鸿运加身。" if result.fortune_roll >= 96 else "气运平稳。"
-    await sign_in_cmd.finish(
-        f"[{result.world_title}] 签到完成，获得灵石 {result.base_reward}，福缘池分红 {result.pool_reward}，"
-        f"修为提升后总计 {result.total_cultivation}。{extra}"
-    )
+    await _finish_reply(sign_in_cmd, event, _format_sign_in_result(result), ACTION_BUTTONS)
 
 
 @sect_list_cmd.handle()
@@ -502,7 +1086,7 @@ async def handle_sect_list(event: Event) -> None:
         if int(sect["required_rebirth_count"]) > 0:
             gate = f" [需{sect['required_rebirth_count']}转]"
         lines.append(f"- {sect['name']}{gate}: {sect['description']}")
-    await sect_list_cmd.finish("\n".join(lines))
+    await _finish_reply(sect_list_cmd, event, "\n".join(lines), METHOD_BUTTONS)
 
 
 @rebirth_cmd.handle()
@@ -581,7 +1165,7 @@ async def handle_methods(event: Event) -> None:
             f"  熟练 {method['mastery']} [{method['mastery_title']}] | 风格 {method['style']}"
         )
     lines.append("想获取更高传承，可发送“请法”查看，或“请法 功法名”。")
-    await methods_cmd.finish("\n".join(lines))
+    await _finish_reply(methods_cmd, event, "\n".join(lines), METHOD_BUTTONS)
 
 
 @method_detail_cmd.handle()
@@ -596,7 +1180,7 @@ async def handle_method_detail(event: Event, args: Message = CommandArg()) -> No
         if reason == "method_not_found":
             await method_detail_cmd.finish("未找到这门功法。可发送“功法详情”查看已学、宗门和野外稀有传承。")
         raise
-    await method_detail_cmd.finish("\n".join(result.lines))
+    await _finish_reply(method_detail_cmd, event, "\n".join(result.lines), METHOD_BUTTONS)
 
 
 @request_method_cmd.handle()
@@ -627,7 +1211,7 @@ async def handle_request_method(event: Event, args: Message = CommandArg()) -> N
                 f"{f' / {option.required_rebirth_count}转' if option.required_rebirth_count else ''}"
                 f" | 灵石{option.spirit_stones_cost} / 道悟{option.insight_cost}"
             )
-        await request_method_cmd.finish("\n".join(lines))
+        await _finish_reply(request_method_cmd, event, "\n".join(lines), METHOD_BUTTONS)
 
     try:
         result = await request_sect_method(event.get_user_id(), method_name)
@@ -718,7 +1302,7 @@ async def handle_inventory(event: Event) -> None:
     lines = ["当前背包:"]
     for item in items:
         lines.append(f"- {item['name']} x{item['quantity']} [{item['item_type']}/{item['rarity']}]")
-    await inventory_cmd.finish("\n".join(lines))
+    await _finish_reply(inventory_cmd, event, "\n".join(lines), _inventory_buttons(lines))
 
 
 @artifacts_cmd.handle()
@@ -736,7 +1320,7 @@ async def handle_artifacts(event: Event) -> None:
             f"- {artifact['name']}{mark} [{artifact['rarity']}] | 熟练 {artifact['mastery']}"
         )
         lines.append(f"  {artifact['effect_brief']}")
-    await artifacts_cmd.finish("\n".join(lines))
+    await _finish_reply(artifacts_cmd, event, "\n".join(lines), ACTION_BUTTONS)
 
 
 @equip_artifact_cmd.handle()
@@ -775,34 +1359,12 @@ async def handle_adventure(event: Event) -> None:
             await adventure_cmd.finish("体力不足，先歇息片刻或等后续回复体力机制。")
         raise
 
-    reward_line = (
-        f"灵石 {result.spirit_stones_delta:+}，修为 {result.cultivation_delta:+}，体力 {result.stamina_delta}。"
+    await _finish_reply(
+        adventure_cmd,
+        event,
+        await _format_adventure_result(event.get_user_id(), result),
+        ACTION_BUTTONS,
     )
-    if result.insight_delta:
-        reward_line += f" 道悟 {result.insight_delta:+}。"
-    if result.reward_item_name:
-        reward_line += f" 额外获得 {result.reward_item_name}。"
-    if result.reward_method_name:
-        reward_line += f" 领悟稀有功法《{result.reward_method_name}》。"
-    narrated_message = await narrate_adventure(
-        event.get_user_id(),
-        _adventure_summary(result),
-        result.message,
-    )
-    lines = [f"[{result.world_title}] {narrated_message}", f"roll={result.roll_value}", reward_line]
-    if result.event_type:
-        lines.append(f"触发{result.event_type}事件 | 危险 {result.danger_level}。")
-    if result.injury_notice:
-        lines.append(result.injury_notice)
-    if result.death_triggered:
-        lines.append("你这次几乎身死道消，虽然角色没有删除，但已经付出重伤代价。")
-    if result.mastery_method_name and result.mastery_gain:
-        lines.append(f"《{result.mastery_method_name}》熟练 +{result.mastery_gain}。")
-    if result.lifespan_notice:
-        lines.append(result.lifespan_notice)
-    if result.event_notice:
-        lines.append(result.event_notice)
-    await adventure_cmd.finish("\n".join(lines))
 
 
 @map_cmd.handle()
@@ -813,7 +1375,7 @@ async def handle_maps(event: Event) -> None:
         if str(exc) == "player_not_found":
             await map_cmd.finish("你还未入道，发送“入道 青玄”开始。")
         raise
-    await map_cmd.finish("\n".join(result.lines))
+    await _finish_reply(map_cmd, event, "\n".join(result.lines), _map_buttons(result.lines))
 
 
 @explore_cmd.handle()
@@ -839,30 +1401,7 @@ async def handle_explore(event: Event, args: Message = CommandArg()) -> None:
             await explore_cmd.finish("体力不足，先签到、服用回灵散或等闭关出关后再探索。")
         raise
 
-    reward_line = (
-        f"灵石 {result.spirit_stones_delta:+}，修为 {result.cultivation_delta:+}，体力 {result.stamina_delta}。"
-    )
-    if result.insight_delta:
-        reward_line += f" 道悟 {result.insight_delta:+}。"
-    if result.breakthrough_ready_delta:
-        reward_line += f" 冲关底蕴 {result.breakthrough_ready_delta:+}。"
-    if result.fortune_delta:
-        reward_line += f" 福缘 {result.fortune_delta:+}。"
-    if result.reward_item_name:
-        reward_line += f" 额外获得 {result.reward_item_name}。"
-    lines = [
-        f"[{result.world_title}] {result.area_name}",
-        result.message,
-        f"roll={result.roll_value} | {result.attribute_used}+{result.attribute_bonus} | 灵根相性+{result.root_bonus}",
-        reward_line,
-    ]
-    if result.mastery_method_name and result.mastery_gain:
-        lines.append(f"《{result.mastery_method_name}》熟练 +{result.mastery_gain}。")
-    if result.lifespan_notice:
-        lines.append(result.lifespan_notice)
-    if result.event_notice:
-        lines.append(result.event_notice)
-    await explore_cmd.finish("\n".join(lines))
+    await _finish_reply(explore_cmd, event, _format_explore_result(result), ACTION_BUTTONS)
 
 
 @encounter_cmd.handle()
@@ -896,7 +1435,7 @@ async def handle_encounter(event: Event) -> None:
         lines.append(result.lifespan_notice)
     if result.event_notice:
         lines.append(result.event_notice)
-    await encounter_cmd.finish("\n".join(lines))
+    await _finish_reply(encounter_cmd, event, "\n".join(lines), ACTION_BUTTONS)
 
 
 @breakthrough_cmd.handle()
@@ -931,7 +1470,7 @@ async def handle_breakthrough(event: Event) -> None:
         lines.append(result.lifespan_notice)
     if result.event_notice:
         lines.append(result.event_notice)
-    await breakthrough_cmd.finish("\n".join(lines))
+    await _finish_reply(breakthrough_cmd, event, "\n".join(lines), ACTION_BUTTONS)
 
 
 @meditate_cmd.handle()
@@ -971,7 +1510,7 @@ async def handle_meditation(event: Event, args: Message = CommandArg()) -> None:
     ]
     if result.method_name:
         lines.append(f"主修功法：《{result.method_name}》。")
-    await meditate_cmd.finish("\n".join(lines))
+    await _finish_reply(meditate_cmd, event, "\n".join(lines), STATUS_BUTTONS)
 
 
 @leave_meditation_cmd.handle()
@@ -988,8 +1527,11 @@ async def handle_leave_meditation(event: Event) -> None:
         raise
 
     if result.still_waiting:
-        await leave_meditation_cmd.finish(
-            f"{result.mode_name or '闭关'}尚未结束，还需约 {result.remaining_minutes} 分钟，可得修为 {result.reward}。"
+        await _finish_reply(
+            leave_meditation_cmd,
+            event,
+            f"{result.mode_name or '闭关'}尚未结束，还需约 {result.remaining_minutes} 分钟，可得修为 {result.reward}。",
+            STATUS_BUTTONS,
         )
     lines = [f"你已出关，本次{result.mode_name or '闭关'} {result.minutes} 分钟，获得修为 {result.reward}。"]
     if result.insight_gain:
@@ -1002,7 +1544,7 @@ async def handle_leave_meditation(event: Event) -> None:
         lines.append(result.lifespan_notice)
     if result.event_notice:
         lines.append(result.event_notice)
-    await leave_meditation_cmd.finish("\n".join(lines))
+    await _finish_reply(leave_meditation_cmd, event, "\n".join(lines), STATUS_BUTTONS)
 
 
 @consume_cmd.handle()
@@ -1042,7 +1584,7 @@ async def handle_consume(event: Event, args: Message = CommandArg()) -> None:
         lines.append(f"冲关底蕴 {result.breakthrough_ready_delta:+}")
     if result.lifespan_delta:
         lines.append(f"寿元上限 {result.lifespan_delta:+}")
-    await consume_cmd.finish("，".join(lines) + "。")
+    await _finish_reply(consume_cmd, event, "，".join(lines) + "。", RESOURCE_BUTTONS)
 
 
 @alchemy_cmd.handle()
@@ -1077,7 +1619,7 @@ async def handle_alchemy(event: Event, args: Message = CommandArg()) -> None:
         lines.append(f"获得副产物 {result.byproduct_name} x{result.byproduct_quantity}。")
     if result.event_notice:
         lines.append(result.event_notice)
-    await alchemy_cmd.finish("\n".join(lines))
+    await _finish_reply(alchemy_cmd, event, "\n".join(lines), RESOURCE_BUTTONS)
 
 
 @insight_cmd.handle()
@@ -1106,7 +1648,7 @@ async def handle_insight(event: Event, args: Message = CommandArg()) -> None:
         lines.append(f"冲关底蕴 +{result.breakthrough_ready_gain}。")
     if result.event_notice:
         lines.append(result.event_notice)
-    await insight_cmd.finish("\n".join(lines))
+    await _finish_reply(insight_cmd, event, "\n".join(lines), METHOD_BUTTONS)
 
 
 @ancient_trial_cmd.handle()
@@ -1139,7 +1681,7 @@ async def handle_ancient_trial(event: Event) -> None:
             lines.append(f"额外获得 {result.reward_item_name} x1。")
     else:
         lines.append(f"修为 {result.reward_cultivation}。")
-    await ancient_trial_cmd.finish("\n".join(lines))
+    await _finish_reply(ancient_trial_cmd, event, "\n".join(lines), ACTION_BUTTONS)
 
 
 @duel_cmd.handle()
@@ -1170,7 +1712,9 @@ async def handle_duel(event: Event, args: Message = CommandArg()) -> None:
         _duel_summary(result),
         result.rounds,
     )
-    await duel_cmd.finish(
+    await _finish_reply(
+        duel_cmd,
+        event,
         "\n".join(
             [
                 f"[{result.world_title}] {result.message}",
@@ -1181,15 +1725,16 @@ async def handle_duel(event: Event, args: Message = CommandArg()) -> None:
                 f"败者 {result.loser_name}，修为 {result.loser_cultivation_loss}，双方体力各消耗 {abs(result.attacker_stamina_delta)}。",
                 *( [result.event_notice] if result.event_notice else [] ),
             ]
-        )
+        ),
+        ACTION_BUTTONS,
     )
 
 
 @market_list_cmd.handle()
-async def handle_market_list() -> None:
+async def handle_market_list(event: Event) -> None:
     listings = await list_market()
     if not listings:
-        await market_list_cmd.finish("坊市目前空空如也。")
+        await _finish_reply(market_list_cmd, event, "坊市目前空空如也。", RESOURCE_BUTTONS)
 
     lines = ["坊市在售:"]
     for listing in listings:
@@ -1197,7 +1742,7 @@ async def handle_market_list() -> None:
             f"#{listing['id']} {listing['item_name']} x{listing['quantity']} "
             f"- {listing['unit_price']} 灵石/件 卖家:{listing['seller_name']}"
         )
-    await market_list_cmd.finish("\n".join(lines))
+    await _finish_reply(market_list_cmd, event, "\n".join(lines), RESOURCE_BUTTONS)
 
 
 @market_create_cmd.handle()
@@ -1264,17 +1809,17 @@ async def handle_market_buy(event: Event, args: Message = CommandArg()) -> None:
 
 
 @ranking_cmd.handle()
-async def handle_ranking() -> None:
+async def handle_ranking(event: Event) -> None:
     rankings = await get_rankings()
     if not rankings:
-        await ranking_cmd.finish("当前尚无排行数据。")
+        await _finish_reply(ranking_cmd, event, "当前尚无排行数据。", MAIN_MENU_BUTTONS)
 
     lines = ["修仙排行榜:"]
     for index, row in enumerate(rankings, start=1):
         lines.append(
             f"{index}. {row['nickname']} | {row['realm']} | 修为 {row['cultivation']} | 灵石 {row['spirit_stones']}"
         )
-    await ranking_cmd.finish("\n".join(lines))
+    await _finish_reply(ranking_cmd, event, "\n".join(lines), MAIN_MENU_BUTTONS)
 
 
 @unknown_slash_cmd.handle()

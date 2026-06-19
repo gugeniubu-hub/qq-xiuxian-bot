@@ -65,7 +65,7 @@ PORT=8080
 
 QQ_IS_SANDBOX=false
 QQ_VERIFY_WEBHOOK=true
-QQ_BOTS='[{"id":"你的AppID","token":"你的Token","secret":"你的AppSecret","intent":{"c2c_group_at_messages":true},"use_websocket":true}]'
+QQ_BOTS='[{"id":"你的AppID","token":"你的Token","secret":"你的AppSecret","intent":{"c2c_group_at_messages":true,"interaction":true},"use_websocket":true}]'
 ```
 
 如果你想使用 Webhook 模式，则把 `use_websocket` 改成 `false`，并在 QQ 开放平台配置 HTTPS 回调地址:
@@ -111,6 +111,22 @@ ONEBOT_SECRET=
 /event   世界事件
 /claim   领取事件
 ```
+
+### QQ 按钮菜单
+
+官方 QQ 机器人支持 Markdown 消息按钮后，项目会在帮助、面板、地图、背包、功法、历练结果等回复下附带快捷按钮。常用按钮会走回调事件，玩家点击后直接执行，例如:
+
+```text
+面板 / 签到 / 历练 / 地图 / 奇遇 / 背包 / 功法 / 排行
+```
+
+复杂命令仍保留文字输入，例如 `斗法 @目标`、`坊市上架 物品名 单价 数量`、`主修功法 功法名`。如果按钮权限暂未生效，可设置:
+
+```dotenv
+QXIAN_QQ_BUTTONS_ENABLED=false
+```
+
+关闭按钮层后，原文字指令不受影响。
 
 ## 技术方案
 
