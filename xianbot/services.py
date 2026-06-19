@@ -1140,6 +1140,8 @@ def _encode_root_profile(
     pattern = _root_pattern_name(len(elements), variant)
     if variant is not None:
         label = f"{variant.value}灵根"
+    elif len(elements) == 1:
+        label = f"{elements[0].value}灵根"
     elif len(elements) == 5:
         label = "五行灵根"
     else:
