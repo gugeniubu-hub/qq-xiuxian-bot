@@ -2161,6 +2161,52 @@ def _attribute_lines(attributes: dict[str, int]) -> list[str]:
     ]
 
 
+def _method_route_summary(method: dict[str, object]) -> str:
+    method_type = MethodType(str(method["method_type"]))
+    affinity = Affinity(str(method["affinity"]))
+    style = MethodStyle(str(method["style"]))
+    type_text = {
+        MethodType.BREATH: "吐纳法偏修炼、法攻、悟性，适合法修起步和日常成长",
+        MethodType.MIND: "心法偏悟道、法防、术法稳定性，适合法修内功",
+        MethodType.BODY: "锻体法偏气血、物防、承伤，适合体修和高风险历练",
+        MethodType.BATTLE: "战诀偏物攻、斗法压制、招式爆发，适合剑修/战修",
+        MethodType.REBIRTH: "轮回经偏转世收益、破境、悟道，适合重修后期路线",
+    }[method_type]
+    affinity_text = {
+        Affinity.METAL: "金系偏物攻、破防、剑势和法宝相性",
+        Affinity.WOOD: "木系偏气血、恢复、悟性和炼丹",
+        Affinity.WATER: "水系偏法防、悟性、续航和消耗",
+        Affinity.FIRE: "火系偏法攻、爆发和冲关",
+        Affinity.EARTH: "土系偏气血、物防和破境底蕴",
+        Affinity.WIND: "风系偏速度、探索、先手和牵制",
+        Affinity.THUNDER: "雷系偏法攻、破境、爆发和先手",
+        Affinity.ICE: "冰系偏法攻、法防、控场和续航",
+        Affinity.VOID: "虚系偏悟道、法防、轮回和奇遇",
+    }[affinity]
+    style_text = {
+        MethodStyle.STEADY: "绵长风格更稳，偏长期修炼",
+        MethodStyle.SURGING: "霸烈风格更猛，偏突破和战斗",
+        MethodStyle.INSIGHT: "明悟风格偏悟道、法修和稳定性",
+        MethodStyle.UNFETTERED: "灵动风格偏速度、探索和牵制",
+        MethodStyle.REBIRTH: "轮回风格在转世后收益更明显",
+    }[style]
+    return f"{type_text}；{affinity_text}；{style_text}"
+
+
+def _method_attribute_delta_text(player: Player, method: dict[str, object]) -> str:
+    base_attributes = _derived_attributes(player, None)
+    method_attributes = _derived_attributes(player, method)
+    deltas = [
+        (name, method_attributes[name] - base_attributes[name])
+        for name in ("气血", "物攻", "法攻", "物防", "法防", "速度", "悟性", "道悟", "破境", "丹道")
+        if method_attributes[name] > base_attributes[name]
+    ]
+    if not deltas:
+        return "无明显直接属性变化，主要体现在修炼/突破/悟道效率。"
+    deltas.sort(key=lambda item: item[1], reverse=True)
+    return " / ".join(f"{name}+{delta}" for name, delta in deltas[:6])
+
+
 def _map_area_by_name(area_name: str) -> dict[str, Any] | None:
     target = area_name.strip()
     if not target:
@@ -3657,6 +3703,8 @@ async def get_method_detail_panel(user_id: str, method_name: str | None = None) 
         f"需求: {method['realm_requirement']} | 转世 {int(method['required_rebirth_count'])} 转",
         f"基础: 修炼+{int(float(method['practice_bonus']) * 100)}% | 冲关+{int(float(method['breakthrough_bonus']) * 100)}% | 悟道+{int(float(method['insight_bonus']) * 100)}%",
         f"当前: 修炼+{int(float(method['practice_total']) * 100)}% | 冲关+{int(method['breakthrough_total'])}% | 悟道+{int(float(method['insight_total']) * 100)}% | 探索+{int(method['adventure_bonus'])}",
+        f"路线: {_method_route_summary(method)}",
+        f"主修属性: {_method_attribute_delta_text(player, method)}",
         f"熟练: {int(method['mastery'])} [{method['mastery_title']}]",
         f"说明: {method['description']}",
     ]

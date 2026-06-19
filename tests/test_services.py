@@ -816,6 +816,14 @@ def test_method_detail_and_root_reroll(tmp_path, monkeypatch) -> None:
         detail_text = "\n".join(detail.lines)
         assert "【功法详情】《吐纳诀》" in detail_text
         assert "当前:" in detail_text
+        assert "路线:" in detail_text
+        assert "主修属性:" in detail_text
+
+        wild_detail = await get_method_detail_panel("72004", "星陨剑典")
+        wild_detail_text = "\n".join(wild_detail.lines)
+        assert "战诀偏物攻" in wild_detail_text
+        assert "金系偏物攻" in wild_detail_text
+        assert "主修属性:" in wild_detail_text
 
         before = await get_player_status("72004")
         assert before is not None
