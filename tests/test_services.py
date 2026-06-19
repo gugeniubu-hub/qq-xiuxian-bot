@@ -1297,7 +1297,14 @@ def test_breakthrough_unlocks_sect_method(tmp_path, monkeypatch) -> None:
             fortune_delta=50,
         )
 
-        result = await breakthrough("10005")
+        import xianbot.services as services
+
+        original_randint = services.random.randint
+        services.random.randint = lambda a, b: 1
+        try:
+            result = await breakthrough("10005")
+        finally:
+            services.random.randint = original_randint
         assert result.success is True
         assert result.next_realm == Realm.FOUNDATION_1.value
         assert "青岚养心篇" in result.unlocked_methods
